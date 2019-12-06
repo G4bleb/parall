@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "*.tcc": "c",
+        "mympi.h": "c",
+        "exemple2.C": "cpp",
+        "cl.h": "c"
+    }
+}

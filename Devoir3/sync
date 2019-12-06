@@ -1,0 +1,4 @@
+while true; do 
+  inotifywait -r -e modify,create,delete ~/parall/Devoir3/
+  rsync -r ~/parall/Devoir3/ mpiuser26@dim-openmpi0.uqac.ca:~/
+done
