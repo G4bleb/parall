@@ -1,16 +1,16 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define MAX_COL 1100 //1024
-#define MAX_ROW 4100 //4096
+// #define MAX_COL 1100 //1024
+// #define MAX_ROW 4100 //4096
 
 #define SQ_OFFSET 0
-#define RW_OFFSET 256
-#define CL_OFFSET 512
-#define BX_OFFSET 768
+#define RW_OFFSET Size *Size
+#define CL_OFFSET Size *Size * 2
+#define BX_OFFSET Size *Size * 3
 
 struct str_node {
-
     struct str_node *Header;
 
     struct str_node *Left;
@@ -23,14 +23,21 @@ struct str_node {
     int count;
 };
 
+int Size;
+int N_input;
+
 int nCol;
 int nRow;
-struct str_node Matrix[MAX_COL][MAX_ROW];
+// struct str_node Matrix[MAX_COL][MAX_ROW];
+struct str_node **Matrix;
 struct str_node Root;
 struct str_node *RootNode = &Root;
-struct str_node *RowHeader[MAX_ROW];
-char Data[MAX_COL][MAX_ROW];
-int Result[MAX_ROW];
+// struct str_node *RowHeader[MAX_ROW];
+struct str_node **RowHeader;
+// char Data[MAX_COL][MAX_ROW];
+char **Data;
+// int Result[MAX_ROW];
+int *Result;
 int nResult = 0;
 char Finished;
 int GlobalProgressUpdate;
@@ -160,16 +167,20 @@ void Search(int k) {
      GlobalProgressUpdate = k;
      }*/
     if ((RootNode->Left == RootNode && RootNode->Right == RootNode) ||
-        k == (256 - MaxK)) {
+        k == (Size * Size - MaxK)) {
         // Valid solution!
-        //		printf("----------- SOLUTION FOUND -----------\n");
+        // printf("----------- SOLUTION FOUND -----------\n");
         PrintSolution();
         Finished = 1;
         return;
     }
+
     struct str_node *Column = ChooseColumn();
-    if (Column->count == 0)
+    if (Column->count == 0){
+        printf("No solutions found\n");
+        // PrintSolution();
         return;
+    }
     Cover(Column);
 
     struct str_node *RowNode;
@@ -198,27 +209,32 @@ void Search(int k) {
 
 // Functions that extract data from a given 3-digit integer index number in the
 // format [N] [R] [C].
-static inline int retNb(int N) { return N / (256); }
-static inline int retRw(int N) { return (N / 16) % 16; }
-static inline int retCl(int N) { return N % 16; }
-static inline int retBx(int N) { return ((retRw(N) / 4) * 4) + (retCl(N) / 4); }
-static inline int retSq(int N) { return retRw(N) * 16 + retCl(N); }
-static inline int retRn(int N) { return retNb(N) * 16 + retRw(N); }
-static inline int retCn(int N) { return retNb(N) * 16 + retCl(N); }
-static inline int retBn(int N) { return retNb(N) * 16 + retBx(N); }
+static inline int retNb(int N) { return N / (Size * Size); }
+static inline int retRw(int N) { return (N / Size) % Size; }
+static inline int retCl(int N) { return N % Size; }
+static inline int retBx(int N) { return ((retRw(N) / N_input) * N_input) + (retCl(N) / N_input); }
+static inline int retSq(int N) { return retRw(N) * Size + retCl(N); }
+static inline int retRn(int N) { return retNb(N) * Size + retRw(N); }
+static inline int retCn(int N) { return retNb(N) * Size + retCl(N); }
+static inline int retBn(int N) { return retNb(N) * Size + retBx(N); }
 // Function that get 3-digit integer index from given info
-static inline int getIn(int Nb, int Rw, int Cl) { return Nb * 256 + Rw * 16 + Cl; }
+static inline int getIn(int Nb, int Rw, int Cl) {
+    return Nb * Size * Size + Rw * Size + Cl;
+}
 
 void PrintSolution(void) {
     int a, b;
-    int Sodoku[16][16] = {};
-    for (a = 0; a < 16; a++)
-        for (b = 0; b < 16; b++)
+    // int Sodoku[Size][Size] = {}
+    int **Sodoku = malloc(Size * sizeof(int *));
+    for (a = 0; a < Size; a++) {
+        Sodoku[a] = malloc(Size * sizeof(int));
+        for (b = 0; b < Size; b++)
             Sodoku[a][b] = -1;
+    }
     for (a = 0; a < nResult; a++)
         Sodoku[retRw(Result[a])][retCl(Result[a])] = retNb(Result[a]);
-    for (a = 0; a < 16; a++) {
-        for (b = 0; b < 16; b++) {
+    for (a = 0; a < Size; a++) {
+        for (b = 0; b < Size; b++) {
             printf("%c", Sodoku[a][b] + 'A');
         }
         printf("\n");
@@ -228,11 +244,11 @@ void PrintSolution(void) {
 void BuildData(void) {
     int a, b, c;
     int Index;
-    nCol = 4 * 16 * 16;
-    nRow = 16 * 16 * 16 + 1;
-    for (a = 0; a < 16; a++) {
-        for (b = 0; b < 16; b++) {
-            for (c = 0; c < 16; c++) {
+    nCol = N_input * Size * Size;
+    nRow = Size * Size * Size + 1;
+    for (a = 0; a < Size; a++) {
+        for (b = 0; b < Size; b++) {
+            for (c = 0; c < Size; c++) {
                 Index = getIn(c, a, b);
                 Data[SQ_OFFSET + retSq(Index)][Index] =
                     1; // Constraint 1: Only 1 per square
@@ -285,33 +301,45 @@ char nextchar() {
 
 void LoadPuzzle() {
     int a, b;
-    char temp[20];
-    for (a = 0; a < 16; a++) {
-        scanf("%s", temp);
-        for (b = 0; b < 16; b++) {
-            char c = temp[b];
-            if (c >= 'A' && c <= 'P') {
-                AddNumber((c - 'A'), a, b);
+    int temp;
+    for (a = 0; a < Size; a++) {
+        for (b = 0; b < Size; b++) {
+            scanf("%d ", &temp);
+            if (temp != 0) {
+                AddNumber(temp - 1, a, b);
             }
         }
     }
 }
-int main(void) {
-    int t;
-    scanf("%d", &t);
-    while (t--) {
-        memset(Data, 0, sizeof(Data));
-        Finished = 0;
-        MaxK = 0;
-        nResult = 0;
-        BuildData();
-        LoadPuzzle();
-        struct str_node *r;
-        for (r = RootNode->Right; r != RootNode; r = r->Right)
-            r->count = countOnes(r);
-        Search(0);
-        if (t > 0)
-            printf("\n");
+
+int main(int argc, char const *argv[]) {
+    if (argc != 2) {
+        printf("Usage : %s n\n", argv[0]);
+        return 1;
     }
+    N_input = atoi(argv[1]);
+    // n = 4;
+    Size = N_input * N_input;
+    int max_col = Size * Size * N_input;
+    int max_row = Size * Size * Size;
+
+    Data = malloc(max_col * sizeof(int *));
+    Matrix = malloc(max_col * sizeof(struct str_node *));
+    int i;
+    for (i = 0; i < max_col; i++) {
+        Matrix[i] = malloc(max_row * sizeof(struct str_node));
+        Data[i] = calloc(max_row, sizeof(int));
+    }
+    Result = malloc(max_row * sizeof(int));
+    RowHeader = malloc(max_row * sizeof(int *));
+    Finished = 0;
+    MaxK = 0;
+    nResult = 0;
+    BuildData();
+    LoadPuzzle();
+    struct str_node *r;
+    for (r = RootNode->Right; r != RootNode; r = r->Right)
+        r->count = countOnes(r);
+    Search(0);
     return 0;
 }
