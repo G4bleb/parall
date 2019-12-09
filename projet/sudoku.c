@@ -52,7 +52,9 @@ static inline int dataDown(int i) { return (i + 1) % nRow; }
 void CreateMatrix(void) {
     int a, b, i, j;
     // Build toroidal linklist matrix according to data bitmap
+    printf("CreateMatrix nested fors...\n");
     for (a = 0; a < nCol; a++) {
+        #pragma omp parallel for private(b, i, j)
         for (b = 0; b < nRow; b++) {
             if (Data[a][b] != 0) {
                 // Left pointer
@@ -61,6 +63,7 @@ void CreateMatrix(void) {
                 do {
                     i = dataLeft(i);
                 } while (Data[i][j] == 0);
+                #pragma omp critical
                 Matrix[a][b].Left = &Matrix[i][j];
                 // Right pointer
                 i = a;
@@ -68,6 +71,7 @@ void CreateMatrix(void) {
                 do {
                     i = dataRight(i);
                 } while (Data[i][j] == 0);
+                #pragma omp critical
                 Matrix[a][b].Right = &Matrix[i][j];
                 // Up pointer
                 i = a;
@@ -75,6 +79,7 @@ void CreateMatrix(void) {
                 do {
                     j = dataUp(j);
                 } while (Data[i][j] == 0);
+                #pragma omp critical
                 Matrix[a][b].Up = &Matrix[i][j];
                 // Down pointer
                 i = a;
@@ -82,15 +87,20 @@ void CreateMatrix(void) {
                 do {
                     j = dataDown(j);
                 } while (Data[i][j] == 0);
+                #pragma omp critical
                 Matrix[a][b].Down = &Matrix[i][j];
                 // Header pointer
+                #pragma omp critical
                 Matrix[a][b].Header = &Matrix[a][nRow - 1];
+                #pragma omp critical
                 Matrix[a][b].IDNum = b;
                 // Row Header
+                #pragma omp critical
                 RowHeader[b] = &Matrix[a][b];
             }
         }
     }
+    printf("CreateMatrix second for...\n");
     for (a = 0; a < nCol; a++) {
         Matrix[a][nRow - 1].IDName = 'C';
         Matrix[a][nRow - 1].IDNum = a;
@@ -107,17 +117,22 @@ void CreateMatrix(void) {
 int countOnes(struct str_node *c) {
     struct str_node *r;
     int i = 0;
-    for (r = c->Down; r != c; r = r->Down)
+    for (r = c->Down; r != c; r = r->Down){
         i++;
+    }
     return i;
 }
 
 struct str_node *ChooseColumn(void) {
     struct str_node *best, *c;
-    int minOnes = 100000;
-    for (c = RootNode->Right; c != RootNode; c = c->Right)
-        if (minOnes > c->count)
-            minOnes = c->count, best = c;
+    int minOnes = 100000;//Should be max ?
+    for (c = RootNode->Right; c != RootNode; c = c->Right){
+        if (minOnes > c->count){
+            minOnes = c->count;
+            best = c;
+        }
+        // printf("Considering c->%d, c -> %c\n",c->IDNum, c->IDName);
+    }
     return best;
 }
 
@@ -177,7 +192,7 @@ void Search(int k) {
 
     struct str_node *Column = ChooseColumn();
     if (Column->count == 0){
-        printf("No solutions found\n");
+        // printf("No solutions found\n");
         // PrintSolution();
         return;
     }
@@ -193,6 +208,7 @@ void Search(int k) {
              RightNode = RightNode->Right) {
             Cover(RightNode->Header);
         }
+        #pragma omp task
         Search(k + 1);
         // Ok, that node didn't quite work
         for (RightNode = RowNode->Left; RightNode != RowNode;
@@ -201,7 +217,7 @@ void Search(int k) {
         }
         Result[--nResult] = 0;
     }
-
+    #pragma omp taskwait
     UnCover(Column);
 }
 
@@ -235,17 +251,25 @@ void PrintSolution(void) {
         Sodoku[retRw(Result[a])][retCl(Result[a])] = retNb(Result[a]);
     for (a = 0; a < Size; a++) {
         for (b = 0; b < Size; b++) {
+            if (b % N_input == 0) {
+                printf("\t");
+            }
             printf("%c", Sodoku[a][b] + 'A');
+        }
+        if ((a + 1) % N_input == 0) {
+            printf("\n");
         }
         printf("\n");
     }
 }
 
 void BuildData(void) {
+    printf("Building Data...\n");
     int a, b, c;
     int Index;
-    nCol = N_input * Size * Size;
+    nCol = Size * Size * 4;
     nRow = Size * Size * Size + 1;
+    printf("First nested for...\n");
     for (a = 0; a < Size; a++) {
         for (b = 0; b < Size; b++) {
             for (c = 0; c < Size; c++) {
@@ -261,10 +285,14 @@ void BuildData(void) {
             }
         }
     }
+    printf("Second for (nCol)\n");
     for (a = 0; a < nCol; a++) {
         Data[a][nRow - 1] = 2;
     }
+    printf("CreateMatrix...\n");
     CreateMatrix();
+
+    printf("Four sequential fors...\n");
     for (a = 0; a < RW_OFFSET; a++) {
         Matrix[a][nRow - 1].IDName = 'S';
         Matrix[a][nRow - 1].IDNum = a;
@@ -289,17 +317,9 @@ static inline void AddNumber(int N, int R, int C) {
     Result[nResult++] = getIn(N, R, C);
 }
 
-/*
-char nextchar() {
-        char c;
-        do {
-                c = getchar();
-        } while (c == ' ' || c == '\n');
-        return c;
-}
-*/
 
 void LoadPuzzle() {
+    printf("Loading puzzle...\n");
     int a, b;
     int temp;
     for (a = 0; a < Size; a++) {
@@ -312,15 +332,12 @@ void LoadPuzzle() {
     }
 }
 
-int main(int argc, char const *argv[]) {
-    if (argc != 2) {
-        printf("Usage : %s n\n", argv[0]);
-        return 1;
-    }
-    N_input = atoi(argv[1]);
+int main(void) {
+    printf("Waiting for input...\n");
+    scanf("%d ", &N_input);
     // n = 4;
     Size = N_input * N_input;
-    int max_col = Size * Size * N_input;
+    int max_col = Size * Size * 4;
     int max_row = Size * Size * Size;
 
     Data = malloc(max_col * sizeof(int *));
@@ -337,9 +354,14 @@ int main(int argc, char const *argv[]) {
     nResult = 0;
     BuildData();
     LoadPuzzle();
+    printf("Got input (puzzle loaded)\n");
     struct str_node *r;
-    for (r = RootNode->Right; r != RootNode; r = r->Right)
+    printf("Counting ones...\n");
+    for (r = RootNode->Right; r != RootNode; r = r->Right){
         r->count = countOnes(r);
+    }
+        
+    printf("Searching...\n");
     Search(0);
     return 0;
 }

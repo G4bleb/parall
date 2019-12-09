@@ -1,0 +1,6 @@
+while true; do 
+  inotifywait -r -e modify,create,delete ~/parall/projet/
+  rsync -r ~/parall/projet/sudoku.c mpiuser26@dim-openmpi0.uqac.ca:~/
+  rsync -r ~/parall/projet/gen.c mpiuser26@dim-openmpi0.uqac.ca:~/
+  rsync -r ~/parall/projet/makefile mpiuser26@dim-openmpi0.uqac.ca:~/
+done
