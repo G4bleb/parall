@@ -5,7 +5,7 @@
 // OpenCL includes
 #include <CL/cl.h>
 #define PLATFORM_INDEX 0
-//2800 54 secondes GTX 1050
+//2800 54 secondes GPU
 //4200 58 secondes CPU
 // OpenCL kernel to perform an element-wise
 // add of two arrays
@@ -68,7 +68,7 @@ int main(int argc, char const *argv[]) {
     size_t datasize = sizeof(int) * elements;
     // Initialize the input data
     int *mat = initialize(n); // IN/OUT
-    // display(mat, n);
+    display(mat, n);
     // Use this to check the output of each API call
     cl_int status;
     //-----------------------------------------------------
@@ -134,11 +134,7 @@ int main(int argc, char const *argv[]) {
         clCreateBuffer(context, CL_MEM_READ_WRITE, datasize, NULL, &status);
     bufferK =
         clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(int), NULL, &status);
-    // STEP 6: Write host data to device buffers
-    //-----------------------------------------------------
-    // Use clEnqueueWriteBuffer() to write
-    status = clEnqueueWriteBuffer(cmdQueue, bufferMat, CL_FALSE, 0, datasize,
-                                  mat, 0, NULL, &inEvent);
+    
     //-----------------------------------------------------
     // STEP 7: Create and compile the program
     //-----------------------------------------------------
@@ -149,10 +145,7 @@ int main(int argc, char const *argv[]) {
     // clBuildProgram()
 
     status = clBuildProgram(program, numDevices, devices, NULL, NULL, NULL);
-    // char erreur[2000];
-    // erreur[1999] = '\0';
-    // clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, 2000,
-    //                       erreur, 2000);
+
     /*size_t len = 0;
     cl_int ret = CL_SUCCESS;
     ret = clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, 0,
@@ -198,6 +191,8 @@ int main(int argc, char const *argv[]) {
     // clEnqueueNDRangeKernel().
     // 'globalWorkSize' is the 1D dimension of the
     // work-items
+    status = clEnqueueWriteBuffer(cmdQueue, bufferMat, CL_FALSE, 0, datasize,
+                                  mat, 0, NULL, &inEvent);
     int k;
     for (k = 0; k < n; k++)
     {
@@ -209,7 +204,6 @@ int main(int argc, char const *argv[]) {
                                         &floydEvent);
         clWaitForEvents(1, &floydEvent);
     }
-    printf("KernelFloyd\n");
 
     //-----------------------------------------------------
     // STEP 12: Read the output buffer back to the host
@@ -220,7 +214,7 @@ int main(int argc, char const *argv[]) {
     clEnqueueReadBuffer(cmdQueue, bufferMat, CL_TRUE, 0, datasize, mat, 0,
                         NULL, &outEvent);
     clWaitForEvents(1, &outEvent);
-    // display(mat, n);
+    display(mat, n);
     //-----------------------------------------------------
     // STEP 13: Release OpenCL resources
     //-----------------------------------------------------
