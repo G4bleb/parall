@@ -1,11 +1,6 @@
-// #include <mpi.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-enum possibilitiesState {FOUND, NOT_FOUND, SUDOKU_WRONG};
-
-int Id;
-int P;
 
 int N_input;
 int Size;
@@ -43,7 +38,6 @@ void printSudoku(int **sdk) {
                 printf("\t");
             }
             printf("%c", sdk[a][b] + 'A' - 1);
-            // printf("%d ", sdk[a][b]);
         }
         if ((a + 1) % N_input == 0) {
             printf("\n");
@@ -77,9 +71,10 @@ bool inBox(int num, int lineNum, int colNum, int **sdk) {
     int i, j;
     int iRelativeToBox = lineNum % N_input;
     int jRelativeToBox = colNum % N_input;
+    int maxJ;
     int maxI = lineNum - iRelativeToBox + N_input;
     for (i = lineNum - iRelativeToBox; i < maxI; i++) {
-        int maxJ = colNum - jRelativeToBox + N_input;
+        maxJ = colNum - jRelativeToBox + N_input;
         for (j = colNum - jRelativeToBox; j < maxJ; j++) {
             if (sdk[i][j] == num) {
                 return true;
@@ -133,12 +128,13 @@ int **getNewSdkFromPool(int **sdk) {
         sdkPoolSize--;
         return sdkPool[sdkPoolSize];
     } else {
-        printf("Could not find any NewSdkFromPool\n");
+        printf("Could not find any answers\n");
         return NULL;
     }
 }
 
-void addCopyOfSdkToSdkPool(int **sdk) {
+void addSdkWithPossibilityToSdkPool(int **sdk, int x, int y, int *possibilities,
+                                    int possibility) {
     int **tmpSdk = malloc(Size * sizeof(int *));
     int i, j;
 
@@ -149,83 +145,90 @@ void addCopyOfSdkToSdkPool(int **sdk) {
         }
     }
 
-    // printf("Sdk with [%d][%d] = %d is now in pool\n", x, y, tmpSdk[x][y]);
+    tmpSdk[x][y] = possibilities[possibility];
+    printf("Sdk with [%d][%d] = %d is now in pool\n", x, y, tmpSdk[x][y]);
     sdkPoolSize++;
     sdkPool = realloc(sdkPool, (sdkPoolSize) * sizeof(int **));
     sdkPool[sdkPoolSize - 1] = tmpSdk;
     // printf("SdkPoolSize = %d\n", sdkPoolSize);
 }
 
-enum possibilitiesState lookForPossibilities(int **sdk, int pool, int *possibilities, int *tmp){
-    int i, j, possibCount;
-    for (i = 0; i < Size; i++) {
-        for (j = 0; j < Size; j++) {
-            if (sdk[i][j] == 0) {
-                possibCount = findPossibilities(i, j, possibilities, sdk);
-                if (!possibCount) return SUDOKU_WRONG;
-                if (possibCount == pool) {
-                    tmp[0] = i;
-                    tmp[1] = j;
-                    return FOUND;
-                }
-            }
-        }
-    }
-    return NOT_FOUND;
-}
-
 int **solveSdk(int **sdk) {
     int possibilities[Size];
     int tmp[2];
-    int k, pool;
-    enum possibilitiesState state;
-    for (pool = 1; pool <= Size; pool++) {
-        state = lookForPossibilities(sdk, pool, possibilities, tmp);
-        if(state == FOUND){
-            if(pool == 1){
-                // printf("One possibility for [%d][%d] : %d\n", tmp[0], tmp[1],possibilities[0]);
-                sdk[tmp[0]][tmp[1]] = possibilities[0];
-            }else{
-                // printf("%d possibilities for [%d][%d]\n", pool, tmp[0], tmp[1]);
-                for (k = 0; k < pool; k++) {
-                    sdk[tmp[0]][tmp[1]] = possibilities[k];
-                    addCopyOfSdkToSdkPool(sdk);
-                }
-                for (k = 0; k < pool; k++) {
-                    #pragma omp task
-                    solveSdk(getNewSdkFromPool(NULL));
+    bool finished = false;
+    bool foundOne;
+    int i, j, k, pool, possibCount;
+    while (!finished) {
+        for (pool = 1; pool <= Size; pool++) {
+            foundOne = false;
+            for (i = 0; i < Size; i++) {
+                for (j = 0; j < Size; j++) {
+                    if (sdk[i][j] == 0) {
+                        possibCount = findPossibilities(i, j, possibilities, sdk);
+                        if (possibCount) {
+                            if (possibCount <= pool) {
+                                foundOne = true;
+                                if (possibCount == 1) {
+                                    sdk[i][j] = possibilities[0];
+                                    // printf("Written %d at %d, %d\n",
+                                    //        possibilities[0], i, j);
+                                } else { // C'est plus
+                                    printf("More than 1 possibility in %d %d\n", i, j);
+                                    // Créer possibCount sudokus
+                                    for (k = 1; k < possibCount; k++) {
+                                        addSdkWithPossibilityToSdkPool(
+                                            sdk, i, j, possibilities, k);
+                                    }
+                                    sdk[i][j] = possibilities[0];
+                                    i = Size;
+                                    j = Size;
+                                }
+                            }
+                        } else {
+                            sdk = getNewSdkFromPool(sdk);
+                            if (!sdk) {
+                                printf("COULD NOT GET A NEW SUDOKU\n");
+                                i = Size;
+                                j = Size;
+                                return NULL;
+                            }
+                        }
+
+                        // printf("There are %d possibilites for %d, %d\n",
+                        //        possibCount, i, j);
+                    }
                 }
             }
-            pool = 0;
-        }else if(state == SUDOKU_WRONG){
-            #pragma omp taskwait
-            // printf("Sudokus wrong : %d\n", ++wrongCounter);
-            // sdk = getNewSdkFromPool(sdk);
-            // printSudoku(sdk);
-            if (!sdk) {
-                printf("COULD NOT GET A NEW SUDOKU\n");
-                return NULL;
-            }
-            pool = 0;
-            return NULL;
-        }else{
-            if(pool == Size){
-                printf("---------------Sudoku solved-----------\n");
-                printSudoku(sdk);
-                exit(0);
+            if (foundOne) {
+                pool = 0;
             }
         }
+        if (!isSdkSolved(sdk)) {
+            sdk = getNewSdkFromPool(sdk);
+            if (!sdk) {
+                printf("SUDOKU NOT SOLVED\n");
+                finished = true;
+            }
+        } else {
+            printf("---------------Sudoku solved\n");
+            finished = true;
+        }
     }
-    return NULL;
+    return sdk;
 }
 
-int main(int argc, char *argv[]) {
-    // MPI_Init(&argc, &argv);
-    // MPI_Comm_rank(MPI_COMM_WORLD, &Id);
-    // MPI_Comm_size(MPI_COMM_WORLD, &P);
-
+int main(void) {
     int **sdk = initialize();
     loadFromInput(sdk);
+    printf("Is 1 in line 3 ? : %d\n", inLine(1, 3, sdk));
+    printf("Is 4 in line 3 ? : %d\n", inLine(4, 3, sdk));
+    printf("Is 4 in col  3 ? : %d\n", inColumn(4, 3, sdk));
+    printf("Is 4 in col  4 ? : %d\n", inColumn(4, 4, sdk));
+    printf("Is 1 in box where 4x4 is ? : %d\n", inBox(1, 4, 4, sdk));
+    printf("Is 4 in col where 4x4 is ? : %d\n", inBox(4, 4, 4, sdk));
+    printf("Can I place a 1 at 0 0 ? : %d\n", canBePlaced(1, 0, 0, sdk));
+    printf("Can I place a 1 at 3 0 ? : %d\n", canBePlaced(1, 3, 0, sdk));
     printSudoku(sdk);
     sdkPool = NULL, sdkPoolSize = 0;
     sdk = solveSdk(sdk);

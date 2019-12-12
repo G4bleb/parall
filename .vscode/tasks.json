@@ -9,7 +9,8 @@
                 "${file}",
                 "-o",
                 "${fileDirname}/${fileBasenameNoExtension}",
-                "-fopenmp"
+                "-Wall",
+                // "-fopenmp"
             ],
             "options": {
                 "cwd": "/usr/bin"

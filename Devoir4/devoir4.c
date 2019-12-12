@@ -6,10 +6,10 @@
 #include <CL/cl.h>
 #define PLATFORM_INDEX 0
 //2800 54 secondes GPU
-//4200 58 secondes CPU
+//4500 58 secondes CPU
 // OpenCL kernel to perform an element-wise
 // add of two arrays
-const char *programSource =
+const char *programSource_bak =
 "__kernel																    \n"
 "void floyd(__global int* mat,											    \n"
 "		__global int* k)									        \n"
@@ -23,6 +23,21 @@ const char *programSource =
 "			? (mat[i * n +j])												    \n"
 "			: (mat[i * n + *k] + mat[*k * n + j]);						    \n"
 "	}																	    \n"
+"}																		    \n"
+;
+
+const char *programSource =
+"__kernel																    \n"
+"void floyd(__global int* mat,											    \n"
+"		__global int* k)									        \n"
+"{																		    \n"
+"																		    \n"
+"	int i = get_global_id(0);											    \n"
+"	int n = get_global_size(0);											    \n"
+"	int j = get_global_id(1);												        		    \n"
+"   int item = mat[i*n+j];\n"
+"   int compr = mat[i * n + *k] + mat[*k * n + j];\n"
+"		mat[i * n + j] = item < compr ? item : compr;						    \n"
 "}																		    \n"
 ;
 
@@ -68,7 +83,7 @@ int main(int argc, char const *argv[]) {
     size_t datasize = sizeof(int) * elements;
     // Initialize the input data
     int *mat = initialize(n); // IN/OUT
-    display(mat, n);
+    // display(mat, n);
     // Use this to check the output of each API call
     cl_int status;
     //-----------------------------------------------------
@@ -146,14 +161,14 @@ int main(int argc, char const *argv[]) {
 
     status = clBuildProgram(program, numDevices, devices, NULL, NULL, NULL);
 
-    /*size_t len = 0;
+    size_t len = 0;
     cl_int ret = CL_SUCCESS;
     ret = clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, 0,
                                 NULL, &len);
     char *buffer = calloc(len, sizeof(char));
     ret = clGetProgramBuildInfo(program, devices[0], CL_PROGRAM_BUILD_LOG, len,
                                 buffer, NULL);
-    printf("%s\n", buffer);*/
+    printf("%s\n", buffer);
 
     if (status){
         printf("ERREUR A LA COMPILATION: %d\n", status);
@@ -181,9 +196,10 @@ int main(int argc, char const *argv[]) {
     // execution. A workgroup size (local work size) is not
     // required,
     // but can be used.
-    size_t globalWorkSize[1];
+    size_t globalWorkSize[2];
     // There are 'elements' work-items
     globalWorkSize[0] = n;
+    globalWorkSize[1] = n;
     //-----------------------------------------------------
     // STEP 11: Enqueue the kernel for execution
     //-----------------------------------------------------
@@ -199,7 +215,7 @@ int main(int argc, char const *argv[]) {
         // printf("k = %d\n", k);
         status = clEnqueueWriteBuffer(cmdQueue, bufferK, CL_FALSE, 0,
                                       sizeof(int), &k, 0, NULL, &inEvent);
-        status = clEnqueueNDRangeKernel(cmdQueue, kernelfloyd, 1, NULL,
+        status = clEnqueueNDRangeKernel(cmdQueue, kernelfloyd, 2, NULL,
                                         globalWorkSize, NULL, 1, &inEvent,
                                         &floydEvent);
         clWaitForEvents(1, &floydEvent);
@@ -214,7 +230,7 @@ int main(int argc, char const *argv[]) {
     clEnqueueReadBuffer(cmdQueue, bufferMat, CL_TRUE, 0, datasize, mat, 0,
                         NULL, &outEvent);
     clWaitForEvents(1, &outEvent);
-    display(mat, n);
+    // display(mat, n);
     //-----------------------------------------------------
     // STEP 13: Release OpenCL resources
     //-----------------------------------------------------

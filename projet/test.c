@@ -10,6 +10,8 @@ int main(int argc, char const *argv[])
     int max_col = MAX_COL, max_row = MAX_ROW;
     int **test2;
     int (*testptr)[max_col][max_row] = &test;
+    int ptroffest = &test[0][4] - &test[0][0];
+    printf("ptroffset = %d\n", ptroffest);
     // &test = testptr;
     test2 = malloc(MAX_COL * sizeof(int *));
     int i, j;

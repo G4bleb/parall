@@ -1,11 +1,8 @@
-// #include <mpi.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-enum possibilitiesState {FOUND, NOT_FOUND, SUDOKU_WRONG};
 
-int Id;
-int P;
+enum possibilitiesState {FOUND, NOT_FOUND, SUDOKU_WRONG};
 
 int N_input;
 int Size;
@@ -219,11 +216,7 @@ int **solveSdk(int **sdk) {
     return NULL;
 }
 
-int main(int argc, char *argv[]) {
-    // MPI_Init(&argc, &argv);
-    // MPI_Comm_rank(MPI_COMM_WORLD, &Id);
-    // MPI_Comm_size(MPI_COMM_WORLD, &P);
-
+int main(void) {
     int **sdk = initialize();
     loadFromInput(sdk);
     printSudoku(sdk);

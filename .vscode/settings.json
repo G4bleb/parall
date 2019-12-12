@@ -3,6 +3,8 @@
         "*.tcc": "c",
         "mympi.h": "c",
         "exemple2.C": "cpp",
-        "cl.h": "c"
+        "cl.h": "c",
+        "stdbool.h": "c",
+        "unistd.h": "c"
     }
 }

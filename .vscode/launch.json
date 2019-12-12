@@ -9,7 +9,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${fileDirname}/${fileBasenameNoExtension}",
-            "args": ["<","mat6"],
+            "args": ["<","mat4"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],
