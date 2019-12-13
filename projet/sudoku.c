@@ -2,18 +2,25 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-enum possibilitiesState {FOUND, NOT_FOUND, SUDOKU_WRONG};
+#include <omp.h>
+
+typedef struct Cell {
+    bool *possibilities;
+    bool solved;
+    int possibCount;
+} Cell;
 
 int Id;
 int P;
 
 int N_input;
 int Size;
-int ***sdkPool;
+Cell ***sdkPool;
 int sdkPoolSize;
+int sdkMaxPoolSize;
 
-int ** initialize() {
-    printf("Waiting for input...\n");
+int **initializeSudoku() {
+    printf("Waiting for size input...\n");
     scanf("%d ", &N_input);
     Size = N_input * N_input;
     int **sdk = malloc(Size * sizeof(int *));
@@ -34,7 +41,7 @@ void loadFromInput(int **sdk) {
     }
 }
 
-void printSudoku(int **sdk) {
+void printIntSudoku(int **sdk) {
     printf("Printing sudoku...\n");
     int a, b;
     for (a = 0; a < Size; a++) {
@@ -97,23 +104,115 @@ bool canBePlaced(int num, int lineNum, int colNum, int **sdk) {
     return false;
 }
 
-int findPossibilities(int lineNum, int colNum, int *ret, int **sdk) {
-    int possibCount = 0;
+int findPossibilities(int lineNum, int colNum, bool *ret, int **sdk) {
     int num;
+    int possibCount = 0;
     for (num = 1; num <= Size; num++) {
         if (canBePlaced(num, lineNum, colNum, sdk)) {
-            ret[possibCount] = num;
+            ret[num - 1] = true;
             possibCount++;
+        } else {
+            ret[num - 1] = false;
         }
     }
     return possibCount;
 }
 
-bool isSdkSolved(int **sdk) {
+bool firstCellWithKPossibilities(Cell **cellSdk, int k, int out[2]) {
     int i, j;
     for (i = 0; i < Size; i++) {
         for (j = 0; j < Size; j++) {
+            if (cellSdk[i][j].possibCount == k && !cellSdk[i][j].solved) {
+                out[0] = i;
+                out[1] = j;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+Cell **CellSudokuFromIntSudoku(int **sdk) {
+    Cell **cellSdk = malloc(Size * sizeof(Cell *));
+    int i, j, num;
+
+    for (i = 0; i < Size; i++) {
+        cellSdk[i] = malloc(Size * sizeof(Cell));
+        for (j = 0; j < Size; j++) {
+            cellSdk[i][j].possibilities = malloc(Size * sizeof(bool));
             if (sdk[i][j] == 0) {
+                cellSdk[i][j].possibCount =
+                    findPossibilities(i, j, cellSdk[i][j].possibilities, sdk);
+                cellSdk[i][j].solved = false;
+
+            } else {
+                for (num = 1; num <= Size; num++) {
+                    cellSdk[i][j].possibilities[num - 1] = false;
+                }
+                cellSdk[i][j].possibilities[sdk[i][j] - 1] = true;
+                cellSdk[i][j].possibCount = 1;
+                cellSdk[i][j].solved = true;
+            }
+        }
+    }
+    return cellSdk;
+}
+
+void destroyCellSdk(Cell **cellSdk) {
+    int i, j;
+    for (i = 0; i < Size; i++) {
+        for (j = 0; j < Size; j++) {
+            free(cellSdk[i][j].possibilities);
+        }
+        free(cellSdk[i]);
+    }
+    free(cellSdk);
+}
+
+void setValue(Cell **cellSdk, int lineNum, int colNum, int val) {
+    // Remove this possibility from other cells
+    // In line, in column; also remove all possibilities for cell where we will
+    // put a new value
+    int i;
+    // #pragma omp parallel fors
+    for (i = 0; i < Size; i++) {
+        if (cellSdk[lineNum][i].possibilities[val - 1]) {
+            cellSdk[lineNum][i].possibilities[val - 1] = false;
+            cellSdk[lineNum][i].possibCount--;
+        }
+        if (cellSdk[i][colNum].possibilities[val - 1]) {
+            cellSdk[i][colNum].possibilities[val - 1] = false;
+            cellSdk[i][colNum].possibCount--;
+        }
+        cellSdk[lineNum][colNum].possibilities[i] = false;
+    }
+    int j;
+    // In box
+    int iRelativeToBox = lineNum % N_input;
+    int jRelativeToBox = colNum % N_input;
+    int maxI = lineNum - iRelativeToBox + N_input;
+    int maxJ;
+    // #pragma omp parallel for private(i, maxJ, j)
+    for (i = lineNum - iRelativeToBox; i < maxI; i++) {
+        maxJ = colNum - jRelativeToBox + N_input;
+        for (j = colNum - jRelativeToBox; j < maxJ; j++) {
+            if (cellSdk[i][j].possibilities[val - 1]) {
+                cellSdk[i][j].possibilities[val - 1] = false;
+                cellSdk[i][j].possibCount--;
+            }
+        }
+    }
+
+    cellSdk[lineNum][colNum].possibilities[val - 1] = true;
+    cellSdk[lineNum][colNum].possibCount = 1;
+    cellSdk[lineNum][colNum].solved = true;
+}
+
+bool isCellSdkSolved(Cell **cellSdk) {
+    int i, j;
+    for (i = 0; i < Size; i++) {
+        for (j = 0; j < Size; j++) {
+            if (!cellSdk[i][j].solved) {
                 return false;
             }
         }
@@ -121,122 +220,142 @@ bool isSdkSolved(int **sdk) {
     return true;
 }
 
-int **getNewSdkFromPool(int **sdk) {
-    int i;
-    if (sdkPoolSize != 0) {
-        if (sdk) {
-            for (i = 0; i < Size; i++) {
-                free(sdk[i]);
+void printSudoku(Cell **cellSdk) {
+    printf("printSudoku...\n");
+    int a, b;
+    int k;
+    for (a = 0; a < Size; a++) {
+        for (b = 0; b < Size; b++) {
+            if (b % N_input == 0) {
+                printf("\t");
             }
-            free(sdk);
+            if (cellSdk[a][b].solved) {
+                for (k = 0; k < Size; k++) {
+                    if (cellSdk[a][b].possibilities[k]) {
+                        printf("%c", k + 'A');
+                        break; // TODO meh
+                    }
+                }
+            } else {
+                printf("%c", '@');
+            }
         }
+        if ((a + 1) % N_input == 0) {
+            printf("\n");
+        }
+        printf("\n");
+    }
+}
+
+bool isCellSdkSolvable(Cell **cellSdk) {
+    int i, j;
+    for (i = 0; i < Size; i++) {
+        for (j = 0; j < Size; j++) {
+            if (cellSdk[i][j].possibCount == 0) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+Cell **popFromSdkPool() {
+    if (sdkPoolSize != 0) {
         sdkPoolSize--;
         return sdkPool[sdkPoolSize];
     } else {
-        printf("Could not find any NewSdkFromPool\n");
+        printf("Could not find any Sdk from pool\n");
         return NULL;
     }
 }
 
-void addCopyOfSdkToSdkPool(int **sdk) {
-    int **tmpSdk = malloc(Size * sizeof(int *));
-    int i, j;
-
-    for (i = 0; i < Size; i++) {
-        tmpSdk[i] = malloc(Size * sizeof(int));
-        for (j = 0; j < Size; j++) {
-            tmpSdk[i][j] = sdk[i][j];
-        }
-    }
-
+void pushToSdkPool(Cell **cellSdk) {
     // printf("Sdk with [%d][%d] = %d is now in pool\n", x, y, tmpSdk[x][y]);
     sdkPoolSize++;
-    sdkPool = realloc(sdkPool, (sdkPoolSize) * sizeof(int **));
-    sdkPool[sdkPoolSize - 1] = tmpSdk;
+    if(sdkPoolSize > sdkMaxPoolSize){
+        sdkPool = realloc(sdkPool, (sdkPoolSize) * sizeof(int **));
+    }
+    sdkPool[sdkPoolSize - 1] = cellSdk;
     // printf("SdkPoolSize = %d\n", sdkPoolSize);
 }
 
-enum possibilitiesState lookForPossibilities(int **sdk, int pool, int *possibilities, int *tmp){
-    int i, j, possibCount;
+Cell **copyCellSdk(Cell **cellSdk) {
+    Cell **tmpCellSdk;
+    tmpCellSdk = malloc(Size * sizeof(Cell *));
+    int i, j, k;
     for (i = 0; i < Size; i++) {
+        tmpCellSdk[i] = malloc(Size * sizeof(Cell));
         for (j = 0; j < Size; j++) {
-            if (sdk[i][j] == 0) {
-                possibCount = findPossibilities(i, j, possibilities, sdk);
-                if (!possibCount) return SUDOKU_WRONG;
-                if (possibCount == pool) {
-                    tmp[0] = i;
-                    tmp[1] = j;
-                    return FOUND;
-                }
+            tmpCellSdk[i][j] = cellSdk[i][j];
+            tmpCellSdk[i][j].possibilities = malloc(Size * sizeof(bool));
+            for (k = 0; k < Size; k++) {
+                tmpCellSdk[i][j].possibilities[k] =
+                    cellSdk[i][j].possibilities[k];
             }
         }
     }
-    return NOT_FOUND;
+    return tmpCellSdk;
 }
 
-int **solveSdk(int **sdk) {
-    int possibilities[Size];
+Cell **solveSudoku(Cell **cellSdk) {
+    Cell **tmpCellSdk;
+    int k, pIndex, i, count;
+    int num;
     int tmp[2];
-    int k, pool;
-    enum possibilitiesState state;
-    for (pool = 1; pool <= Size; pool++) {
-        state = lookForPossibilities(sdk, pool, possibilities, tmp);
-        if(state == FOUND){
-            if(pool == 1){
-                // printf("One possibility for [%d][%d] : %d\n", tmp[0], tmp[1],possibilities[0]);
-                sdk[tmp[0]][tmp[1]] = possibilities[0];
-            }else{
-                // printf("%d possibilities for [%d][%d]\n", pool, tmp[0], tmp[1]);
-                for (k = 0; k < pool; k++) {
-                    sdk[tmp[0]][tmp[1]] = possibilities[k];
-                    addCopyOfSdkToSdkPool(sdk);
-                }
-                for (k = 0; k < pool; k++) {
-                    #pragma omp task
-                    solveSdk(getNewSdkFromPool(NULL));
+    for (num = 1; num <= Size; num++) {
+        while (firstCellWithKPossibilities(cellSdk, num, tmp)) {
+            pIndex = -1;
+            for (k = 0; k < num; k++) {
+                tmpCellSdk = copyCellSdk(cellSdk);
+                for (pIndex++; cellSdk[tmp[0]][tmp[1]].possibilities[pIndex] != true; pIndex++);
+                setValue(tmpCellSdk, tmp[0], tmp[1], pIndex + 1);
+                if (isCellSdkSolvable(tmpCellSdk)) {
+                    // Le dérivé est résolvable
+                    #pragma omp critical
+                    pushToSdkPool(tmpCellSdk);
+                } else {
+                    destroyCellSdk(tmpCellSdk);
                 }
             }
-            pool = 0;
-        }else if(state == SUDOKU_WRONG){
-            #pragma omp taskwait
-            // printf("Sudokus wrong : %d\n", ++wrongCounter);
-            // sdk = getNewSdkFromPool(sdk);
-            // printSudoku(sdk);
-            if (!sdk) {
-                printf("COULD NOT GET A NEW SUDOKU\n");
-                return NULL;
+            count = sdkPoolSize;
+            #pragma omp parallel for private(i, tmpCellSdk)
+            for (i = 0; i < count; i++) {
+                #pragma omp critical
+                tmpCellSdk = popFromSdkPool();
+                // #pragma omp task
+                tmpCellSdk = solveSudoku(tmpCellSdk);
+                if(tmpCellSdk) exit(0);
             }
-            pool = 0;
-            return NULL;
-        }else{
-            if(pool == Size){
-                printf("---------------Sudoku solved-----------\n");
-                printSudoku(sdk);
-                exit(0);
-            }
+            return tmpCellSdk;
         }
     }
-    return NULL;
+    printSudoku(cellSdk);
+    return cellSdk;
 }
 
 int main(int argc, char *argv[]) {
     // MPI_Init(&argc, &argv);
     // MPI_Comm_rank(MPI_COMM_WORLD, &Id);
     // MPI_Comm_size(MPI_COMM_WORLD, &P);
-
-    int **sdk = initialize();
-    loadFromInput(sdk);
-    printSudoku(sdk);
-    sdkPool = NULL, sdkPoolSize = 0;
-    sdk = solveSdk(sdk);
-    if(sdk){
-        printSudoku(sdk);
-        int i;
-        for (i = 0; i < Size; i++) {
-            free(sdk[i]);
-        }
-        free(sdk);
-    }
     
+    int **sdk = initializeSudoku();
+    loadFromInput(sdk);
+    // omp_set_num_threads(Size);
+    Cell **cellSdk = CellSudokuFromIntSudoku(sdk);
+    //printIntSudoku(sdk);
+    printSudoku(cellSdk);
+    sdkPool = NULL, sdkPoolSize = 0;
+    solveSudoku(cellSdk);
+    // sdk = solveSdk(sdk);
+    // if(sdk){
+    //     printIntSudoku(sdk);
+
+    // }
+    int i;
+    for (i = 0; i < Size; i++) {
+        free(sdk[i]);
+    }
+    free(sdk);
+    destroyCellSdk(cellSdk);
     return 0;
 }

@@ -17,7 +17,7 @@ struct str_node {
     struct str_node *Right;
     struct str_node *Up;
     struct str_node *Down;
-    
+
     char IDName;
     int IDNum;
     int count;
