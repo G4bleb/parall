@@ -1,15 +1,8 @@
-#include <mpi.h>
+// #include <mpi.h>
 #include <omp.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#define TAG_SUDOKU 0
-#define TAG_CELL 1
-#define TAG_WAITING 2
-#define TAG_SOLVED 3
-
-bool Finalized;
 
 typedef struct Cell {
     bool *possibilities;
@@ -279,7 +272,7 @@ Cell **popFromSdkPool() {
 void pushToSdkPool(Cell **cellSdk) {
     // printf("Sdk with [%d][%d] = %d is now in pool\n", x, y, tmpSdk[x][y]);
     sdkPoolSize++;
-    if(sdkPoolSize > sdkMaxPoolSize){
+    if (sdkPoolSize > sdkMaxPoolSize) {
         sdkPool = realloc(sdkPool, (sdkPoolSize) * sizeof(int **));
     }
     sdkPool[sdkPoolSize - 1] = cellSdk;
@@ -304,67 +297,7 @@ Cell **copyCellSdk(Cell **cellSdk) {
     return tmpCellSdk;
 }
 
-void mpiSendSdk(Cell **cellSdk, int destination){
-    // bool over = !cellSdk;
-    // MPI_Send(&over, 1, MPI_C_BOOL, destination, TAG_SUDOKU, MPI_COMM_WORLD);
-    // if (over) {
-    //     return;
-    // }
-    int i, j;
-    for (i = 0; i < Size; i++) {
-        for (j = 0; j < Size; j++) {
-            MPI_Send(cellSdk[i][j].possibilities, Size, MPI_C_BOOL, destination, TAG_CELL, MPI_COMM_WORLD);
-            MPI_Send(&cellSdk[i][j].possibCount, 1, MPI_INT, destination, TAG_CELL, MPI_COMM_WORLD);
-            MPI_Send(&cellSdk[i][j].solved, 1, MPI_C_BOOL, destination, TAG_CELL, MPI_COMM_WORLD);
-        }
-    }
-}
-
-Cell ** mpiReceiveSdk(){
-    // MPI_Status status;
-    // bool dummy;
-    // MPI_Recv(&dummy, 1, MPI_C_BOOL, 0, TAG_SUDOKU, MPI_COMM_WORLD, &status);
-
-    Cell **tmpCellSdk;
-    tmpCellSdk = malloc(Size * sizeof(Cell *));
-    int i, j;
-    for (i = 0; i < Size; i++) {
-        tmpCellSdk[i] = malloc(Size * sizeof(Cell));
-        for (j = 0; j < Size; j++) {
-            tmpCellSdk[i][j].possibilities = malloc(Size * sizeof(bool));
-            MPI_Recv(tmpCellSdk[i][j].possibilities, Size, MPI_C_BOOL, 0, TAG_CELL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&tmpCellSdk[i][j].possibCount, 1, MPI_INT, 0, TAG_CELL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&tmpCellSdk[i][j].solved, 1, MPI_C_BOOL, 0, TAG_CELL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        }
-    }
-    return tmpCellSdk;
-}
-
-void mpiISendSolved(int destination) {
-    printf("ps %d Isending Solved to ps %d\n", Id, destination);
-    MPI_Request req;
-    bool tmp = true;
-    MPI_Isend(&tmp, 1, MPI_C_BOOL, destination, TAG_SOLVED, MPI_COMM_WORLD, &req);
-    MPI_Request_free(&req);
-}
-void mpiSendSolved(int destination) {
-    printf("ps %d sending Solved to ps %d\n", Id, destination);
-    bool tmp = true;
-    MPI_Send(&tmp, 1, MPI_C_BOOL, destination, TAG_SOLVED, MPI_COMM_WORLD);
-}
-
-Cell **solveSudoku(Cell **cellSdk, MPI_Request * solvedReq) {
-    int flag = false, send_flag = false;
-    MPI_Test(solvedReq, &flag, MPI_STATUS_IGNORE);
-    if (flag) {
-        Finalized = true;
-        printf("Finalizing process %d\n", Id);
-        // if (!Finalized)
-        MPI_Finalize();
-        // Finalized = true;
-        exit(0);
-    }
-    MPI_Request req;
+Cell **solveSudoku(Cell **cellSdk) {
     Cell **tmpCellSdk;
     int k, pIndex, i, count;
     int num;
@@ -374,151 +307,59 @@ Cell **solveSudoku(Cell **cellSdk, MPI_Request * solvedReq) {
             pIndex = -1;
             for (k = 0; k < num; k++) {
                 tmpCellSdk = copyCellSdk(cellSdk);
-                for (pIndex++; cellSdk[tmp[0]][tmp[1]].possibilities[pIndex] != true; pIndex++);
+                for (pIndex++;
+                     cellSdk[tmp[0]][tmp[1]].possibilities[pIndex] != true;
+                     pIndex++)
+                    ;
                 setValue(tmpCellSdk, tmp[0], tmp[1], pIndex + 1);
                 if (isCellSdkSolvable(tmpCellSdk)) {
-                    // Le dérivé est résolvable
-                    #pragma omp critical
+// Le dérivé est résolvable
+#pragma omp critical
                     pushToSdkPool(tmpCellSdk);
                 } else {
                     destroyCellSdk(tmpCellSdk);
                 }
             }
             count = sdkPoolSize;
-            if(!Id){
-                int idtoSendTo;
-                for (i = 1; i < count; i++) {
-                    tmpCellSdk = popFromSdkPool();
-                    // printf("i = %d, Preparing to get asked for a Sudoku\n", i);
-                    MPI_Irecv(&idtoSendTo, 1, MPI_INT, MPI_ANY_SOURCE, TAG_WAITING, MPI_COMM_WORLD, &req);
-                    while (!flag && !send_flag){
-                        MPI_Test(&req, &send_flag, MPI_STATUS_IGNORE);
-                        MPI_Test(solvedReq, &flag, MPI_STATUS_IGNORE);
-                    }
-                    if (flag) {tmpCellSdk = solveSudoku(tmpCellSdk, solvedReq);}
-                    // printf("It was send_flag (= %d), rank %d\n", send_flag, idtoSendTo);
-                    mpiSendSdk(tmpCellSdk, idtoSendTo);
-                }
-                tmpCellSdk = solveSudoku(popFromSdkPool(), solvedReq);
-                // if (tmpCellSdk) {
-                //     for (k = 1; k < P; k++) {
-                //         mpiSendSolved(k);
-                //     }
-                //     // if (!Finalized) MPI_Finalize();
-                //     Finalized = true;
-                //     exit(0);
-                //     // printf("mpiReceiveSdk Finalizing for process %d\n", Id);
-                //     // Finalize = true;
-                // }
-            }else{
-                //shared(Finalize)
-                // #pragma omp parallel for private(i, tmpCellSdk) shared(Finalized)
-                for (i = 0; i < count; i++) {
-                    #pragma omp critical
-                    tmpCellSdk = popFromSdkPool();
-                    tmpCellSdk = solveSudoku(tmpCellSdk, solvedReq);
-                    // if (tmpCellSdk && Finalized == false) {
-                    //     for (k = 0; k < P; k++){
-                    //         // mpiISendSolved(k);
-                    //         if (k != Id) mpiSendSolved(k);
-                    //     }
-                    //     // MPI_Finalize();
-                    //     Finalized = true;
-                    //     exit(0);
-                    // }
-                    MPI_Test(solvedReq, &flag, MPI_STATUS_IGNORE);
-                    if (!Finalized && flag) {
-                        Finalized = true;
-                        printf("Finalizing process %d\n", Id);
-                        // MPI_Finalize();
-                        exit(0);
-                    }
-                }
+#pragma omp parallel for private(i, tmpCellSdk)
+            for (i = 0; i < count; i++) {
+#pragma omp critical
+                tmpCellSdk = popFromSdkPool();
+                // #pragma omp task
+                tmpCellSdk = solveSudoku(tmpCellSdk);
+                if (tmpCellSdk)
+                    exit(0);
             }
-            // MPI_Reduce(&Finalize, &Finalize, 1, MPI_C_BOOL, MPI_LOR, 0, MPI_COMM_WORLD);
-            // MPI_Bcast(&Finalize, 1, MPI_INT, 0, MPI_COMM_WORLD);
-            
-            // if(Finalize){
-            //     MPI_Finalize();
-            //     exit(0);
-            // }
-            
             return tmpCellSdk;
         }
     }
-    // MPI_Reduce(&Finalized, &Finalized, 1, MPI_C_BOOL, MPI_LOR, 0,
-    // MPI_COMM_WORLD); MPI_Bcast(&Finalized, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    if(!Finalized){
-        Finalized = true;
-        printf("Process %d print :\n", Id);
-        printSudoku(cellSdk);
-        for (k = 0; k < P; k++) {
-            if (k != Id)
-                mpiISendSolved(k);
-            //     mpiSendSolved(k);
-        }
-        printf("Finalizing process %d\n", Id);
-        MPI_Finalize();
-        exit(0);
-    }
-    
-    // MPI_Reduce(&Finalize, &Finalize, 1, MPI_C_BOOL, MPI_LOR, 0, MPI_COMM_WORLD);
-    // MPI_Bcast(&Finalize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    printSudoku(cellSdk);
     return cellSdk;
 }
 
-
 int main(int argc, char *argv[]) {
-    MPI_Init(&argc, &argv);
-    MPI_Comm_rank(MPI_COMM_WORLD, &Id);
-    MPI_Comm_size(MPI_COMM_WORLD, &P);
+    // MPI_Init(&argc, &argv);
+    // MPI_Comm_rank(MPI_COMM_WORLD, &Id);
+    // MPI_Comm_size(MPI_COMM_WORLD, &P);
 
-    int **sdk = NULL;
-    if(!Id){
-        sdk = initializeSudoku();
-    }
-
-    MPI_Bcast(&N_input, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(&Size, 1, MPI_INT, 0, MPI_COMM_WORLD);
-
+    int **sdk = initializeSudoku();
+    loadFromInput(sdk);
+    // omp_set_num_threads(Size);
+    Cell **cellSdk = CellSudokuFromIntSudoku(sdk);
+    // printIntSudoku(sdk);
+    printSudoku(cellSdk);
     sdkPool = NULL, sdkPoolSize = 0;
-    Finalized = false;
-    bool dummy = false;
-    MPI_Request req;
-    MPI_Irecv(&dummy, 1, MPI_C_BOOL, MPI_ANY_SOURCE, TAG_SOLVED, MPI_COMM_WORLD, &req);
-    if (!Id) {
-        loadFromInput(sdk);
-        Cell **cellSdk = CellSudokuFromIntSudoku(sdk);
-        int i;
-        for (i = 0; i < Size; i++) {
-            free(sdk[i]);
-        }
-        free(sdk);
-        printSudoku(cellSdk);
-        solveSudoku(cellSdk, &req);
-        MPI_Finalize();
-        //destroyCellSdk(cellSdk);
-    }else{
-        // int flag;
-        while(true){
-            // MPI_Test(&req, &flag, MPI_STATUS_IGNORE);
-            // if (flag) {
-            //     printf("Finalizing process %d\n", Id);
-            //     MPI_Finalize();
-            //     exit(0);
-            // }
-            MPI_Send(&Id, 1, MPI_INT, 0, TAG_WAITING, MPI_COMM_WORLD);
-            solveSudoku(mpiReceiveSdk(), &req);
-        }
-    }
-    //printIntSudoku(sdk);
-    
-    
-    
+    solveSudoku(cellSdk);
     // sdk = solveSdk(sdk);
     // if(sdk){
     //     printIntSudoku(sdk);
 
     // }
+    int i;
+    for (i = 0; i < Size; i++) {
+        free(sdk[i]);
+    }
+    free(sdk);
+    destroyCellSdk(cellSdk);
     return 0;
 }
