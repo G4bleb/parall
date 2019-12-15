@@ -1,17 +1,14 @@
-// #include <mpi.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 enum possibilitiesState {FOUND, NOT_FOUND, SUDOKU_WRONG};
 
-int Id;
-int P;
+int N_input;     // n
+int Size;        // Taille du sudoku (n*n)
+int ***sdkPool; // Tableau de sudokus
+int sdkPoolSize; // Taille de ^
 
-int N_input;
-int Size;
-int ***sdkPool;
-int sdkPoolSize;
-
+// Récupère la taille du sudoku et alloue de la mémoire pour lui
 int ** initialize() {
     printf("Waiting for input...\n");
     scanf("%d ", &N_input);
@@ -24,6 +21,7 @@ int ** initialize() {
     return sdk;
 }
 
+// Charge le sudoku dans une matrice d'entiers
 void loadFromInput(int **sdk) {
     printf("Loading sudoku...\n");
     int a, b;
@@ -34,6 +32,7 @@ void loadFromInput(int **sdk) {
     }
 }
 
+// Imprime un sudoku
 void printSudoku(int **sdk) {
     printf("Printing sudoku...\n");
     int a, b;
@@ -52,6 +51,7 @@ void printSudoku(int **sdk) {
     }
 }
 
+// Vérifie si la valeur donnée est présente dans la ligne
 bool inLine(int num, int lineNum, int **sdk) {
     int j;
     for (j = 0; j < Size; j++) {
@@ -62,6 +62,7 @@ bool inLine(int num, int lineNum, int **sdk) {
     return false;
 }
 
+// Vérifie si la valeur donnée est présente dans la colonne
 bool inColumn(int num, int colNum, int **sdk) {
     int i;
     for (i = 0; i < Size; i++) {
@@ -72,7 +73,9 @@ bool inColumn(int num, int colNum, int **sdk) {
     return false;
 }
 
-// TODO A optimiser pour ne pas repasser sur la ligne et la colonne
+// Vérifie si la valeur donnée est présente dans la boîte
+// Pourrait être optimisé pour ne pas repasser sur certaines valeurs vérifiées
+// par inLine et inColumn
 bool inBox(int num, int lineNum, int colNum, int **sdk) {
     int i, j;
     int iRelativeToBox = lineNum % N_input;
@@ -89,6 +92,7 @@ bool inBox(int num, int lineNum, int colNum, int **sdk) {
     return false;
 }
 
+// Vérifie si une valeur peut être placée dans le Sudoku
 bool canBePlaced(int num, int lineNum, int colNum, int **sdk) {
     if (!inLine(num, lineNum, sdk) && !inColumn(num, colNum, sdk) &&
         !inBox(num, lineNum, colNum, sdk)) {
@@ -97,6 +101,11 @@ bool canBePlaced(int num, int lineNum, int colNum, int **sdk) {
     return false;
 }
 
+/**
+ * Trouve les possibilités à mettre dans une case
+ * ret est le tableau des possibilités
+ * renvoie le nombre de possibilités
+ */
 int findPossibilities(int lineNum, int colNum, int *ret, int **sdk) {
     int possibCount = 0;
     int num;
@@ -109,6 +118,7 @@ int findPossibilities(int lineNum, int colNum, int *ret, int **sdk) {
     return possibCount;
 }
 
+//Vérifie si un sudoku est résolu
 bool isSdkSolved(int **sdk) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -121,6 +131,7 @@ bool isSdkSolved(int **sdk) {
     return true;
 }
 
+// Retire la dernière valeur du Pool de sudoku, et libère le sudoku donnée en paramètre
 int **getNewSdkFromPool(int **sdk) {
     int i;
     if (sdkPoolSize != 0) {
@@ -138,6 +149,7 @@ int **getNewSdkFromPool(int **sdk) {
     }
 }
 
+// Ajoute un sudoku au bout du pool de sudoku
 void addCopyOfSdkToSdkPool(int **sdk) {
     int **tmpSdk = malloc(Size * sizeof(int *));
     int i, j;
@@ -149,13 +161,16 @@ void addCopyOfSdkToSdkPool(int **sdk) {
         }
     }
 
-    // printf("Sdk with [%d][%d] = %d is now in pool\n", x, y, tmpSdk[x][y]);
     sdkPoolSize++;
     sdkPool = realloc(sdkPool, (sdkPoolSize) * sizeof(int **));
     sdkPool[sdkPoolSize - 1] = tmpSdk;
-    // printf("SdkPoolSize = %d\n", sdkPoolSize);
 }
 
+/**
+ * Cherche la première case pouvant accueillir k possibilités dans un sudoku
+ * tmp contient les coordonnées de la case trouvée (paramètre de sortie)
+ * 
+*/
 enum possibilitiesState lookForPossibilities(int **sdk, int pool, int *possibilities, int *tmp){
     int i, j, possibCount;
     for (i = 0; i < Size; i++) {
@@ -174,14 +189,16 @@ enum possibilitiesState lookForPossibilities(int **sdk, int pool, int *possibili
     return NOT_FOUND;
 }
 
+// Résout un Sudoku (récursif pour les sous-sudokus)
 int **solveSdk(int **sdk) {
     int possibilities[Size];
     int tmp[2];
     int k, pool;
     enum possibilitiesState state;
-    for (pool = 1; pool <= Size; pool++) {
+    for (pool = 1; pool <= Size;
+         pool++) { // On cherche les possibilités dans l'ordre croissant
         state = lookForPossibilities(sdk, pool, possibilities, tmp);
-        if(state == FOUND){
+        if (state == FOUND) { // Si l'on a trouvé une possilibilité
             if(pool == 1){
                 // printf("One possibility for [%d][%d] : %d\n", tmp[0], tmp[1],possibilities[0]);
                 sdk[tmp[0]][tmp[1]] = possibilities[0];
@@ -195,13 +212,10 @@ int **solveSdk(int **sdk) {
                     #pragma omp task
                     solveSdk(getNewSdkFromPool(NULL));
                 }
+                #pragma omp taskwait
             }
             pool = 0;
         }else if(state == SUDOKU_WRONG){
-            #pragma omp taskwait
-            // printf("Sudokus wrong : %d\n", ++wrongCounter);
-            // sdk = getNewSdkFromPool(sdk);
-            // printSudoku(sdk);
             if (!sdk) {
                 printf("COULD NOT GET A NEW SUDOKU\n");
                 return NULL;
@@ -219,16 +233,13 @@ int **solveSdk(int **sdk) {
     return NULL;
 }
 
-int main(int argc, char *argv[]) {
-    // MPI_Init(&argc, &argv);
-    // MPI_Comm_rank(MPI_COMM_WORLD, &Id);
-    // MPI_Comm_size(MPI_COMM_WORLD, &P);
-
+int main(void) {
     int **sdk = initialize();
     loadFromInput(sdk);
     printSudoku(sdk);
     sdkPool = NULL, sdkPoolSize = 0;
     sdk = solveSdk(sdk);
+
     if(sdk){
         printSudoku(sdk);
         int i;
@@ -237,6 +248,5 @@ int main(int argc, char *argv[]) {
         }
         free(sdk);
     }
-    
     return 0;
 }

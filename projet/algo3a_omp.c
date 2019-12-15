@@ -1,24 +1,21 @@
-// #include <mpi.h>
 #include <omp.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 typedef struct Cell {
-    bool *possibilities;
-    bool solved;
-    int possibCount;
+    bool *possibilities; // Chiffres possibles dans une cellule, taille n*n
+    bool solved;         // Définitivement résolue ou pas
+    int possibCount;     // Nombre de possibilités restantes
 } Cell;
 
-int Id;
-int P;
+int N_input;        // n
+int Size;           // Taille du sudoku (n*n)
+Cell ***sdkPool;    // Tableau de sudokus
+int sdkPoolSize;    // Taille de ^
+int sdkMaxPoolSize; // Taille maximum jamais atteinte de ^
 
-int N_input;
-int Size;
-Cell ***sdkPool;
-int sdkPoolSize;
-int sdkMaxPoolSize;
-
+// Récupère la taille du sudoku et alloue de la mémoire pour lui
 int **initializeSudoku() {
     printf("Waiting for size input...\n");
     scanf("%d ", &N_input);
@@ -31,6 +28,7 @@ int **initializeSudoku() {
     return sdk;
 }
 
+// Charge le sudoku dans une matrice d'entiers
 void loadFromInput(int **sdk) {
     printf("Loading sudoku...\n");
     int a, b;
@@ -41,6 +39,7 @@ void loadFromInput(int **sdk) {
     }
 }
 
+// Imprime un sudoku d'entiers
 void printIntSudoku(int **sdk) {
     printf("Printing sudoku...\n");
     int a, b;
@@ -50,7 +49,6 @@ void printIntSudoku(int **sdk) {
                 printf("\t");
             }
             printf("%c", sdk[a][b] + 'A' - 1);
-            // printf("%d ", sdk[a][b]);
         }
         if ((a + 1) % N_input == 0) {
             printf("\n");
@@ -59,6 +57,7 @@ void printIntSudoku(int **sdk) {
     }
 }
 
+// Vérifie si la valeur donnée est présente dans la ligne
 bool inLine(int num, int lineNum, int **sdk) {
     int j;
     for (j = 0; j < Size; j++) {
@@ -69,6 +68,7 @@ bool inLine(int num, int lineNum, int **sdk) {
     return false;
 }
 
+// Vérifie si la valeur donnée est présente dans la colonne
 bool inColumn(int num, int colNum, int **sdk) {
     int i;
     for (i = 0; i < Size; i++) {
@@ -79,7 +79,9 @@ bool inColumn(int num, int colNum, int **sdk) {
     return false;
 }
 
-// TODO A optimiser pour ne pas repasser sur la ligne et la colonne
+// Vérifie si la valeur donnée est présente dans la boîte
+// Pourrait être optimisé pour ne pas repasser sur certaines valeurs vérifiées
+// par inLine et inColumn
 bool inBox(int num, int lineNum, int colNum, int **sdk) {
     int i, j;
     int iRelativeToBox = lineNum % N_input;
@@ -96,6 +98,7 @@ bool inBox(int num, int lineNum, int colNum, int **sdk) {
     return false;
 }
 
+// Vérifie si une valeur peut être placée dans le Sudoku
 bool canBePlaced(int num, int lineNum, int colNum, int **sdk) {
     if (!inLine(num, lineNum, sdk) && !inColumn(num, colNum, sdk) &&
         !inBox(num, lineNum, colNum, sdk)) {
@@ -104,6 +107,11 @@ bool canBePlaced(int num, int lineNum, int colNum, int **sdk) {
     return false;
 }
 
+/**
+ * Trouve les possibilités à mettre dans une case
+ * ret est le tableau de possibilités de la Cell (paramètre de sortie)
+ * renvoie le nombre de possibilités
+ */
 int findPossibilities(int lineNum, int colNum, bool *ret, int **sdk) {
     int num;
     int possibCount = 0;
@@ -118,6 +126,11 @@ int findPossibilities(int lineNum, int colNum, bool *ret, int **sdk) {
     return possibCount;
 }
 
+/**
+ * Trouve la première cellule contenant k possibilités
+ * ret contient les coordonnées de la Cell (paramètre de sortie)
+ * renvoie true si une cellule a été trouvée
+ */
 bool firstCellWithKPossibilities(Cell **cellSdk, int k, int out[2]) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -132,6 +145,9 @@ bool firstCellWithKPossibilities(Cell **cellSdk, int k, int out[2]) {
     return false;
 }
 
+/**
+ * Créé un Sudoku de cellules à partir d'un Sudoku d'entiers
+ */
 Cell **CellSudokuFromIntSudoku(int **sdk) {
     Cell **cellSdk = malloc(Size * sizeof(Cell *));
     int i, j, num;
@@ -140,12 +156,12 @@ Cell **CellSudokuFromIntSudoku(int **sdk) {
         cellSdk[i] = malloc(Size * sizeof(Cell));
         for (j = 0; j < Size; j++) {
             cellSdk[i][j].possibilities = malloc(Size * sizeof(bool));
-            if (sdk[i][j] == 0) {
+            if (sdk[i][j] == 0) { // Valeur inconnue
                 cellSdk[i][j].possibCount =
                     findPossibilities(i, j, cellSdk[i][j].possibilities, sdk);
                 cellSdk[i][j].solved = false;
 
-            } else {
+            } else { // Valeur connue
                 for (num = 1; num <= Size; num++) {
                     cellSdk[i][j].possibilities[num - 1] = false;
                 }
@@ -158,6 +174,7 @@ Cell **CellSudokuFromIntSudoku(int **sdk) {
     return cellSdk;
 }
 
+// Détruit un sudoku de cellules
 void destroyCellSdk(Cell **cellSdk) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -168,22 +185,23 @@ void destroyCellSdk(Cell **cellSdk) {
     }
     free(cellSdk);
 }
-
+// Assigne une valeur à une cellule, devenant la seule possibilité qu'elle
+// contient Met à jour les possbilités des autres cellules affectées
 void setValue(Cell **cellSdk, int lineNum, int colNum, int val) {
-    // Remove this possibility from other cells
-    // In line, in column; also remove all possibilities for cell where we will
-    // put a new value
     int i;
-    // #pragma omp parallel fors
+    // #pragma omp parallel for
     for (i = 0; i < Size; i++) {
+        // Dans la ligne
         if (cellSdk[lineNum][i].possibilities[val - 1]) {
             cellSdk[lineNum][i].possibilities[val - 1] = false;
             cellSdk[lineNum][i].possibCount--;
         }
+        // Dans la colonne
         if (cellSdk[i][colNum].possibilities[val - 1]) {
             cellSdk[i][colNum].possibilities[val - 1] = false;
             cellSdk[i][colNum].possibCount--;
         }
+        // Retire toutes les possibilités de la cellule
         cellSdk[lineNum][colNum].possibilities[i] = false;
     }
     int j;
@@ -203,11 +221,13 @@ void setValue(Cell **cellSdk, int lineNum, int colNum, int val) {
         }
     }
 
+    // Une seule possibilité vraie
     cellSdk[lineNum][colNum].possibilities[val - 1] = true;
     cellSdk[lineNum][colNum].possibCount = 1;
     cellSdk[lineNum][colNum].solved = true;
 }
 
+// Vérifie si toutes les cellules du sudoku sont résolues
 bool isCellSdkSolved(Cell **cellSdk) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -219,7 +239,7 @@ bool isCellSdkSolved(Cell **cellSdk) {
     }
     return true;
 }
-
+// Imprime un sudoku de cellules
 void printSudoku(Cell **cellSdk) {
     printf("printSudoku...\n");
     int a, b;
@@ -233,7 +253,7 @@ void printSudoku(Cell **cellSdk) {
                 for (k = 0; k < Size; k++) {
                     if (cellSdk[a][b].possibilities[k]) {
                         printf("%c", k + 'A');
-                        break; // TODO meh
+                        break; // Unique possibilité imprimée
                     }
                 }
             } else {
@@ -247,6 +267,7 @@ void printSudoku(Cell **cellSdk) {
     }
 }
 
+// Vérifie si un Sudoku de cellules est résolvable
 bool isCellSdkSolvable(Cell **cellSdk) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -259,6 +280,7 @@ bool isCellSdkSolvable(Cell **cellSdk) {
     return true;
 }
 
+// Retire la dernière valeur du Pool de sudoku
 Cell **popFromSdkPool() {
     if (sdkPoolSize != 0) {
         sdkPoolSize--;
@@ -269,16 +291,16 @@ Cell **popFromSdkPool() {
     }
 }
 
+// Ajoute un sudoku au bout du pool de sudoku
 void pushToSdkPool(Cell **cellSdk) {
-    // printf("Sdk with [%d][%d] = %d is now in pool\n", x, y, tmpSdk[x][y]);
     sdkPoolSize++;
     if (sdkPoolSize > sdkMaxPoolSize) {
         sdkPool = realloc(sdkPool, (sdkPoolSize) * sizeof(int **));
     }
     sdkPool[sdkPoolSize - 1] = cellSdk;
-    // printf("SdkPoolSize = %d\n", sdkPoolSize);
 }
 
+// Copie un Sudoku de Cells
 Cell **copyCellSdk(Cell **cellSdk) {
     Cell **tmpCellSdk;
     tmpCellSdk = malloc(Size * sizeof(Cell *));
@@ -297,37 +319,39 @@ Cell **copyCellSdk(Cell **cellSdk) {
     return tmpCellSdk;
 }
 
+// Résoud un Sudoku (récursif pour les sous-sudokus)
 Cell **solveSudoku(Cell **cellSdk) {
     Cell **tmpCellSdk;
     int k, pIndex, i, count;
     int num;
     int tmp[2];
-    for (num = 1; num <= Size; num++) {
-        while (firstCellWithKPossibilities(cellSdk, num, tmp)) {
+    for (num = 1; num <= Size; num++) { // On cherche les possibilités dans l'ordre croissant
+        if (firstCellWithKPossibilities(cellSdk, num, tmp)) {//Si l'on a trouvé une possibilité 
             pIndex = -1;
-            for (k = 0; k < num; k++) {
+            for (k = 0; k < num; k++) { // Pour toutes les possibilités
+                // Créer un nouveau sudoku
                 tmpCellSdk = copyCellSdk(cellSdk);
+                // Trouver la possiblité
                 for (pIndex++;
                      cellSdk[tmp[0]][tmp[1]].possibilities[pIndex] != true;
-                     pIndex++)
-                    ;
+                     pIndex++);
+                // Ecrire la valeur dans le sudoku
                 setValue(tmpCellSdk, tmp[0], tmp[1], pIndex + 1);
                 if (isCellSdkSolvable(tmpCellSdk)) {
-// Le dérivé est résolvable
-#pragma omp critical
+                    // Le dérivé est résolvable
+                    #pragma omp critical
                     pushToSdkPool(tmpCellSdk);
                 } else {
                     destroyCellSdk(tmpCellSdk);
                 }
             }
             count = sdkPoolSize;
-#pragma omp parallel for private(i, tmpCellSdk)
+            #pragma omp parallel for private(i, tmpCellSdk)
             for (i = 0; i < count; i++) {
-#pragma omp critical
+                #pragma omp critical
                 tmpCellSdk = popFromSdkPool();
-                // #pragma omp task
                 tmpCellSdk = solveSudoku(tmpCellSdk);
-                if (tmpCellSdk)
+                if (tmpCellSdk)//n'est pas NULL = sudoku résolu
                     exit(0);
             }
             return tmpCellSdk;
@@ -337,24 +361,15 @@ Cell **solveSudoku(Cell **cellSdk) {
     return cellSdk;
 }
 
-int main(int argc, char *argv[]) {
-    // MPI_Init(&argc, &argv);
-    // MPI_Comm_rank(MPI_COMM_WORLD, &Id);
-    // MPI_Comm_size(MPI_COMM_WORLD, &P);
+int main(void) {
 
     int **sdk = initializeSudoku();
     loadFromInput(sdk);
-    // omp_set_num_threads(Size);
     Cell **cellSdk = CellSudokuFromIntSudoku(sdk);
-    // printIntSudoku(sdk);
     printSudoku(cellSdk);
     sdkPool = NULL, sdkPoolSize = 0;
     solveSudoku(cellSdk);
-    // sdk = solveSdk(sdk);
-    // if(sdk){
-    //     printIntSudoku(sdk);
-
-    // }
+    
     int i;
     for (i = 0; i < Size; i++) {
         free(sdk[i]);

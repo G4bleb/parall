@@ -2,13 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// #define MAX_COL 1100 //1024
-// #define MAX_ROW 4100 //4096
-
 #define SQ_OFFSET 0
-#define RW_OFFSET Size *Size
-#define CL_OFFSET Size *Size * 2
-#define BX_OFFSET Size *Size * 3
+#define RW_OFFSET Size * Size
+#define CL_OFFSET Size * Size * 2
+#define BX_OFFSET Size * Size * 3
 
 struct str_node {
     struct str_node *Header;
@@ -23,24 +20,23 @@ struct str_node {
     int count;
 };
 
-int Size;
-int N_input;
+int N_input;//n
+int Size;   // Taille du sudoku (n*n)
 
 int nCol;
 int nRow;
-// struct str_node Matrix[MAX_COL][MAX_ROW];
+
 struct str_node **Matrix;
 struct str_node Root;
 struct str_node *RootNode = &Root;
-// struct str_node *RowHeader[MAX_ROW];
+
 struct str_node **RowHeader;
-// char Data[MAX_COL][MAX_ROW];
+
 char **Data;
-// int Result[MAX_ROW];
+
 int *Result;
 int nResult = 0;
 char Finished;
-int GlobalProgressUpdate;
 int MaxK;
 
 // --> Initialisation functions
@@ -49,9 +45,9 @@ static inline int dataRight(int i) { return (i + 1) % nCol; }
 static inline int dataUp(int i) { return i - 1 < 0 ? nRow - 1 : i - 1; }
 static inline int dataDown(int i) { return (i + 1) % nRow; }
 
+//Construit la matrice chaînée
 void CreateMatrix(void) {
     int a, b, i, j;
-    // Build toroidal linklist matrix according to data bitmap
     printf("CreateMatrix nested fors...\n");
     for (a = 0; a < nCol; a++) {
 #pragma omp parallel for private(b, i, j)
@@ -63,7 +59,6 @@ void CreateMatrix(void) {
                 do {
                     i = dataLeft(i);
                 } while (Data[i][j] == 0);
-#pragma omp critical
                 Matrix[a][b].Left = &Matrix[i][j];
                 // Right pointer
                 i = a;
@@ -71,7 +66,6 @@ void CreateMatrix(void) {
                 do {
                     i = dataRight(i);
                 } while (Data[i][j] == 0);
-#pragma omp critical
                 Matrix[a][b].Right = &Matrix[i][j];
                 // Up pointer
                 i = a;
@@ -79,7 +73,6 @@ void CreateMatrix(void) {
                 do {
                     j = dataUp(j);
                 } while (Data[i][j] == 0);
-#pragma omp critical
                 Matrix[a][b].Up = &Matrix[i][j];
                 // Down pointer
                 i = a;
@@ -87,15 +80,11 @@ void CreateMatrix(void) {
                 do {
                     j = dataDown(j);
                 } while (Data[i][j] == 0);
-#pragma omp critical
                 Matrix[a][b].Down = &Matrix[i][j];
-// Header pointer
-#pragma omp critical
+                // Header pointer
                 Matrix[a][b].Header = &Matrix[a][nRow - 1];
-#pragma omp critical
                 Matrix[a][b].IDNum = b;
-// Row Header
-#pragma omp critical
+                // Row Header
                 RowHeader[b] = &Matrix[a][b];
             }
         }
@@ -125,7 +114,7 @@ int countOnes(struct str_node *c) {
 
 struct str_node *ChooseColumn(void) {
     struct str_node *best, *c;
-    int minOnes = 100000; // Should be max ?
+    int minOnes = 100000;
     for (c = RootNode->Right; c != RootNode; c = c->Right) {
         if (minOnes > c->count) {
             minOnes = c->count;
@@ -176,15 +165,9 @@ void SolutionRow(struct str_node *RowNode) {
 void PrintSolution(void);
 
 void Search(int k) {
-    /*if(GlobalProgressUpdate < k) {
-     printf("== Search(%d)\n", k);
-     PrintSolution();
-     GlobalProgressUpdate = k;
-     }*/
     if ((RootNode->Left == RootNode && RootNode->Right == RootNode) ||
         k == (Size * Size - MaxK)) {
         // Valid solution!
-        // printf("----------- SOLUTION FOUND -----------\n");
         PrintSolution();
         Finished = 1;
         return;
@@ -193,7 +176,6 @@ void Search(int k) {
     struct str_node *Column = ChooseColumn();
     if (Column->count == 0) {
         // printf("No solutions found\n");
-        // PrintSolution();
         return;
     }
     Cover(Column);
@@ -208,7 +190,7 @@ void Search(int k) {
              RightNode = RightNode->Right) {
             Cover(RightNode->Header);
         }
-#pragma omp task
+        #pragma omp task
         Search(k + 1);
         // Ok, that node didn't quite work
         for (RightNode = RowNode->Left; RightNode != RowNode;
@@ -217,7 +199,7 @@ void Search(int k) {
         }
         Result[--nResult] = 0;
     }
-#pragma omp taskwait
+    #pragma omp taskwait
     UnCover(Column);
 }
 
@@ -336,7 +318,6 @@ void LoadPuzzle() {
 int main(void) {
     printf("Waiting for input...\n");
     scanf("%d ", &N_input);
-    // n = 4;
     Size = N_input * N_input;
     int max_col = Size * Size * 4;
     int max_row = Size * Size * Size;

@@ -9,23 +9,24 @@
 #define TAG_WAITING 2
 #define TAG_SOLVED 3
 
-bool Finalized;
+MPI_Request ReqSolved; // Requête correspondant à l'arrêt du programme
 
 typedef struct Cell {
-    bool *possibilities;
-    bool solved;
-    int possibCount;
+    bool *possibilities; // Chiffres possibles dans une cellule, taille n*n
+    bool solved;         // Définitivement résolue ou pas
+    int possibCount;     // Nombre de possibilités restantes
 } Cell;
 
-int Id;
-int P;
+int Id; // Id du process
+int P;  // Nombre de process
 
-int N_input;
-int Size;
-Cell ***sdkPool;
-int sdkPoolSize;
-int sdkMaxPoolSize;
+int N_input;        // n
+int Size;           // Taille du sudoku (n*n)
+Cell ***sdkPool;    // Tableau de sudokus
+int sdkPoolSize;    // Taille de ^
+int sdkMaxPoolSize; // Taille maximum jamais atteinte de ^
 
+//Récupère la taille du sudoku et alloue de la mémoire pour lui
 int **initializeSudoku() {
     printf("Waiting for size input...\n");
     scanf("%d ", &N_input);
@@ -38,6 +39,7 @@ int **initializeSudoku() {
     return sdk;
 }
 
+// Charge le sudoku dans une matrice d'entiers
 void loadFromInput(int **sdk) {
     printf("Loading sudoku...\n");
     int a, b;
@@ -48,6 +50,7 @@ void loadFromInput(int **sdk) {
     }
 }
 
+// Imprime un sudoku d'entiers
 void printIntSudoku(int **sdk) {
     printf("Printing sudoku...\n");
     int a, b;
@@ -57,7 +60,6 @@ void printIntSudoku(int **sdk) {
                 printf("\t");
             }
             printf("%c", sdk[a][b] + 'A' - 1);
-            // printf("%d ", sdk[a][b]);
         }
         if ((a + 1) % N_input == 0) {
             printf("\n");
@@ -66,6 +68,7 @@ void printIntSudoku(int **sdk) {
     }
 }
 
+// Vérifie si la valeur donnée est présente dans la ligne
 bool inLine(int num, int lineNum, int **sdk) {
     int j;
     for (j = 0; j < Size; j++) {
@@ -76,6 +79,7 @@ bool inLine(int num, int lineNum, int **sdk) {
     return false;
 }
 
+// Vérifie si la valeur donnée est présente dans la colonne
 bool inColumn(int num, int colNum, int **sdk) {
     int i;
     for (i = 0; i < Size; i++) {
@@ -86,7 +90,9 @@ bool inColumn(int num, int colNum, int **sdk) {
     return false;
 }
 
-// TODO A optimiser pour ne pas repasser sur la ligne et la colonne
+// Vérifie si la valeur donnée est présente dans la boîte
+// Pourrait être optimisé pour ne pas repasser sur certaines valeurs vérifiées
+// par inLine et inColumn
 bool inBox(int num, int lineNum, int colNum, int **sdk) {
     int i, j;
     int iRelativeToBox = lineNum % N_input;
@@ -103,6 +109,7 @@ bool inBox(int num, int lineNum, int colNum, int **sdk) {
     return false;
 }
 
+// Vérifie si une valeur peut être placée dans le Sudoku
 bool canBePlaced(int num, int lineNum, int colNum, int **sdk) {
     if (!inLine(num, lineNum, sdk) && !inColumn(num, colNum, sdk) &&
         !inBox(num, lineNum, colNum, sdk)) {
@@ -111,6 +118,11 @@ bool canBePlaced(int num, int lineNum, int colNum, int **sdk) {
     return false;
 }
 
+/**
+ * Trouve les possibilités à mettre dans une case
+ * ret est le tableau de possibilités de la Cell (paramètre de sortie)
+ * renvoie le nombre de possibilités
+ */
 int findPossibilities(int lineNum, int colNum, bool *ret, int **sdk) {
     int num;
     int possibCount = 0;
@@ -125,6 +137,11 @@ int findPossibilities(int lineNum, int colNum, bool *ret, int **sdk) {
     return possibCount;
 }
 
+/**
+ * Trouve la première cellule contenant k possibilités
+ * ret contient les coordonnées de la Cell (paramètre de sortie)
+ * renvoie true si une cellule a été trouvée
+ */
 bool firstCellWithKPossibilities(Cell **cellSdk, int k, int out[2]) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -139,6 +156,9 @@ bool firstCellWithKPossibilities(Cell **cellSdk, int k, int out[2]) {
     return false;
 }
 
+/**
+ * Créé un Sudoku de cellules à partir d'un Sudoku d'entiers
+ */
 Cell **CellSudokuFromIntSudoku(int **sdk) {
     Cell **cellSdk = malloc(Size * sizeof(Cell *));
     int i, j, num;
@@ -147,12 +167,12 @@ Cell **CellSudokuFromIntSudoku(int **sdk) {
         cellSdk[i] = malloc(Size * sizeof(Cell));
         for (j = 0; j < Size; j++) {
             cellSdk[i][j].possibilities = malloc(Size * sizeof(bool));
-            if (sdk[i][j] == 0) {
+            if (sdk[i][j] == 0) { // Valeur inconnue
                 cellSdk[i][j].possibCount =
                     findPossibilities(i, j, cellSdk[i][j].possibilities, sdk);
                 cellSdk[i][j].solved = false;
 
-            } else {
+            } else { // Valeur connue
                 for (num = 1; num <= Size; num++) {
                     cellSdk[i][j].possibilities[num - 1] = false;
                 }
@@ -165,6 +185,7 @@ Cell **CellSudokuFromIntSudoku(int **sdk) {
     return cellSdk;
 }
 
+// Détruit un sudoku de cellules
 void destroyCellSdk(Cell **cellSdk) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -176,21 +197,22 @@ void destroyCellSdk(Cell **cellSdk) {
     free(cellSdk);
 }
 
+// Assigne une valeur à une cellule, devenant la seule possibilité qu'elle
+// contient Met à jour les possbilités des autres cellules affectées
 void setValue(Cell **cellSdk, int lineNum, int colNum, int val) {
-    // Remove this possibility from other cells
-    // In line, in column; also remove all possibilities for cell where we will
-    // put a new value
     int i;
-    // #pragma omp parallel fors
     for (i = 0; i < Size; i++) {
+        //Dans la ligne
         if (cellSdk[lineNum][i].possibilities[val - 1]) {
             cellSdk[lineNum][i].possibilities[val - 1] = false;
             cellSdk[lineNum][i].possibCount--;
         }
+        //Dans la colonne
         if (cellSdk[i][colNum].possibilities[val - 1]) {
             cellSdk[i][colNum].possibilities[val - 1] = false;
             cellSdk[i][colNum].possibCount--;
         }
+        //Retire toutes les possibilités de la cellule
         cellSdk[lineNum][colNum].possibilities[i] = false;
     }
     int j;
@@ -199,7 +221,7 @@ void setValue(Cell **cellSdk, int lineNum, int colNum, int val) {
     int jRelativeToBox = colNum % N_input;
     int maxI = lineNum - iRelativeToBox + N_input;
     int maxJ;
-    // #pragma omp parallel for private(i, maxJ, j)
+
     for (i = lineNum - iRelativeToBox; i < maxI; i++) {
         maxJ = colNum - jRelativeToBox + N_input;
         for (j = colNum - jRelativeToBox; j < maxJ; j++) {
@@ -209,12 +231,13 @@ void setValue(Cell **cellSdk, int lineNum, int colNum, int val) {
             }
         }
     }
-
+    // Une seule possibilité vraie
     cellSdk[lineNum][colNum].possibilities[val - 1] = true;
     cellSdk[lineNum][colNum].possibCount = 1;
     cellSdk[lineNum][colNum].solved = true;
 }
 
+//Vérifie si toutes les cellules du sudoku sont résolues
 bool isCellSdkSolved(Cell **cellSdk) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -227,6 +250,7 @@ bool isCellSdkSolved(Cell **cellSdk) {
     return true;
 }
 
+//Imprime un sudoku de cellules
 void printSudoku(Cell **cellSdk) {
     printf("printSudoku...\n");
     int a, b;
@@ -240,7 +264,7 @@ void printSudoku(Cell **cellSdk) {
                 for (k = 0; k < Size; k++) {
                     if (cellSdk[a][b].possibilities[k]) {
                         printf("%c", k + 'A');
-                        break; // TODO meh
+                        break;//Unique possibilité imprimée
                     }
                 }
             } else {
@@ -254,6 +278,7 @@ void printSudoku(Cell **cellSdk) {
     }
 }
 
+// Vérifie si un Sudoku de cellules est résolvable
 bool isCellSdkSolvable(Cell **cellSdk) {
     int i, j;
     for (i = 0; i < Size; i++) {
@@ -266,26 +291,27 @@ bool isCellSdkSolvable(Cell **cellSdk) {
     return true;
 }
 
+// Retire la dernière valeur du Pool de sudoku
 Cell **popFromSdkPool() {
     if (sdkPoolSize != 0) {
         sdkPoolSize--;
         return sdkPool[sdkPoolSize];
     } else {
-        printf("Could not find any Sdk from pool\n");
+        printf("ps %d could not find any Sdk from pool\n", Id);
         return NULL;
     }
 }
 
+// Ajoute un sudoku au bout du pool de sudoku
 void pushToSdkPool(Cell **cellSdk) {
-    // printf("Sdk with [%d][%d] = %d is now in pool\n", x, y, tmpSdk[x][y]);
     sdkPoolSize++;
     if(sdkPoolSize > sdkMaxPoolSize){
         sdkPool = realloc(sdkPool, (sdkPoolSize) * sizeof(int **));
     }
     sdkPool[sdkPoolSize - 1] = cellSdk;
-    // printf("SdkPoolSize = %d\n", sdkPoolSize);
 }
 
+// Copie un Sudoku de Cells
 Cell **copyCellSdk(Cell **cellSdk) {
     Cell **tmpCellSdk;
     tmpCellSdk = malloc(Size * sizeof(Cell *));
@@ -304,27 +330,44 @@ Cell **copyCellSdk(Cell **cellSdk) {
     return tmpCellSdk;
 }
 
+//Termine le programme
+void quit(int msg){
+    printf("Finalizing process %d\n", Id);
+    MPI_Finalize();
+    exit(msg);
+}
+
+//Attend une requête MPI, tout en vérifiant que le programme n'est pas fini
+bool mpiWaitforRequest(MPI_Request *reqToWait) {
+    int flagSolved = false, flagReady = false;
+    while (!flagSolved && !flagReady) {
+        MPI_Test(&ReqSolved, &flagSolved, MPI_STATUS_IGNORE);
+        MPI_Test(reqToWait, &flagReady, MPI_STATUS_IGNORE);
+    }
+    if (flagSolved)
+        quit(0);
+    return false;
+}
+
+//Envoie un sudoku à la destination donneé
 void mpiSendSdk(Cell **cellSdk, int destination){
-    // bool over = !cellSdk;
-    // MPI_Send(&over, 1, MPI_C_BOOL, destination, TAG_SUDOKU, MPI_COMM_WORLD);
-    // if (over) {
-    //     return;
-    // }
+    MPI_Request req;
     int i, j;
     for (i = 0; i < Size; i++) {
         for (j = 0; j < Size; j++) {
-            MPI_Send(cellSdk[i][j].possibilities, Size, MPI_C_BOOL, destination, TAG_CELL, MPI_COMM_WORLD);
-            MPI_Send(&cellSdk[i][j].possibCount, 1, MPI_INT, destination, TAG_CELL, MPI_COMM_WORLD);
-            MPI_Send(&cellSdk[i][j].solved, 1, MPI_C_BOOL, destination, TAG_CELL, MPI_COMM_WORLD);
+            MPI_Isend(cellSdk[i][j].possibilities, Size, MPI_C_BOOL, destination, TAG_CELL, MPI_COMM_WORLD, &req);
+            mpiWaitforRequest(&req);
+            MPI_Isend(&cellSdk[i][j].possibCount, 1, MPI_INT, destination, TAG_CELL, MPI_COMM_WORLD, &req);
+            mpiWaitforRequest(&req);
+            MPI_Isend(&cellSdk[i][j].solved, 1, MPI_C_BOOL, destination, TAG_CELL, MPI_COMM_WORLD, &req);
+            mpiWaitforRequest(&req);
         }
     }
 }
 
+//Reçoit un Sudoku
 Cell ** mpiReceiveSdk(){
-    // MPI_Status status;
-    // bool dummy;
-    // MPI_Recv(&dummy, 1, MPI_C_BOOL, 0, TAG_SUDOKU, MPI_COMM_WORLD, &status);
-
+    MPI_Request req;
     Cell **tmpCellSdk;
     tmpCellSdk = malloc(Size * sizeof(Cell *));
     int i, j;
@@ -332,14 +375,18 @@ Cell ** mpiReceiveSdk(){
         tmpCellSdk[i] = malloc(Size * sizeof(Cell));
         for (j = 0; j < Size; j++) {
             tmpCellSdk[i][j].possibilities = malloc(Size * sizeof(bool));
-            MPI_Recv(tmpCellSdk[i][j].possibilities, Size, MPI_C_BOOL, 0, TAG_CELL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&tmpCellSdk[i][j].possibCount, 1, MPI_INT, 0, TAG_CELL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            MPI_Recv(&tmpCellSdk[i][j].solved, 1, MPI_C_BOOL, 0, TAG_CELL, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Irecv(tmpCellSdk[i][j].possibilities, Size, MPI_C_BOOL, 0, TAG_CELL, MPI_COMM_WORLD, &req);
+            mpiWaitforRequest(&req);
+            MPI_Irecv(&tmpCellSdk[i][j].possibCount, 1, MPI_INT, 0, TAG_CELL, MPI_COMM_WORLD, &req);
+            mpiWaitforRequest(&req);
+            MPI_Irecv(&tmpCellSdk[i][j].solved, 1, MPI_C_BOOL, 0, TAG_CELL, MPI_COMM_WORLD, &req);
+            mpiWaitforRequest(&req);
         }
     }
     return tmpCellSdk;
 }
 
+//Envoie le message de fin de programme à la destination donnée
 void mpiISendSolved(int destination) {
     printf("ps %d Isending Solved to ps %d\n", Id, destination);
     MPI_Request req;
@@ -347,34 +394,31 @@ void mpiISendSolved(int destination) {
     MPI_Isend(&tmp, 1, MPI_C_BOOL, destination, TAG_SOLVED, MPI_COMM_WORLD, &req);
     MPI_Request_free(&req);
 }
-void mpiSendSolved(int destination) {
-    printf("ps %d sending Solved to ps %d\n", Id, destination);
-    bool tmp = true;
-    MPI_Send(&tmp, 1, MPI_C_BOOL, destination, TAG_SOLVED, MPI_COMM_WORLD);
-}
 
-Cell **solveSudoku(Cell **cellSdk, MPI_Request * solvedReq) {
-    int flag = false, send_flag = false;
-    MPI_Test(solvedReq, &flag, MPI_STATUS_IGNORE);
-    if (flag) {
-        Finalized = true;
-        printf("Finalizing process %d\n", Id);
-        // if (!Finalized)
-        MPI_Finalize();
-        // Finalized = true;
-        exit(0);
-    }
+//Résoud un Sudoku (récursif pour les sous-sudokus)
+Cell **solveSudoku(Cell **cellSdk) {
+    int flag = false;
     MPI_Request req;
     Cell **tmpCellSdk;
     int k, pIndex, i, count;
     int num;
     int tmp[2];
-    for (num = 1; num <= Size; num++) {
-        while (firstCellWithKPossibilities(cellSdk, num, tmp)) {
+
+    MPI_Test(&ReqSolved, &flag, MPI_STATUS_IGNORE); // Faut-il quitter ?
+    if (flag)
+        quit(0);
+    if (!cellSdk)
+        return NULL;
+
+    for (num = 1; num <= Size; num++) {//On cherche les possibilités dans l'ordre croissant
+        if (firstCellWithKPossibilities(cellSdk, num, tmp)) {//Si l'on a trouvé une possilibilité 
             pIndex = -1;
-            for (k = 0; k < num; k++) {
+            for (k = 0; k < num; k++) {//Pour toutes les possiblités
+                //Créer un nouveau sudoku
                 tmpCellSdk = copyCellSdk(cellSdk);
+                //Trouver la possiblité
                 for (pIndex++; cellSdk[tmp[0]][tmp[1]].possibilities[pIndex] != true; pIndex++);
+                //Ecrire la valeur dans le sudoku
                 setValue(tmpCellSdk, tmp[0], tmp[1], pIndex + 1);
                 if (isCellSdkSolvable(tmpCellSdk)) {
                     // Le dérivé est résolvable
@@ -385,88 +429,40 @@ Cell **solveSudoku(Cell **cellSdk, MPI_Request * solvedReq) {
                 }
             }
             count = sdkPoolSize;
-            if(!Id){
+            if(!Id){//Le processus 0 distribue ses sudokus
                 int idtoSendTo;
                 for (i = 1; i < count; i++) {
                     tmpCellSdk = popFromSdkPool();
                     // printf("i = %d, Preparing to get asked for a Sudoku\n", i);
                     MPI_Irecv(&idtoSendTo, 1, MPI_INT, MPI_ANY_SOURCE, TAG_WAITING, MPI_COMM_WORLD, &req);
-                    while (!flag && !send_flag){
-                        MPI_Test(&req, &send_flag, MPI_STATUS_IGNORE);
-                        MPI_Test(solvedReq, &flag, MPI_STATUS_IGNORE);
-                    }
-                    if (flag) {tmpCellSdk = solveSudoku(tmpCellSdk, solvedReq);}
-                    // printf("It was send_flag (= %d), rank %d\n", send_flag, idtoSendTo);
+                    mpiWaitforRequest(&req);
                     mpiSendSdk(tmpCellSdk, idtoSendTo);
                 }
-                tmpCellSdk = solveSudoku(popFromSdkPool(), solvedReq);
-                // if (tmpCellSdk) {
-                //     for (k = 1; k < P; k++) {
-                //         mpiSendSolved(k);
-                //     }
-                //     // if (!Finalized) MPI_Finalize();
-                //     Finalized = true;
-                //     exit(0);
-                //     // printf("mpiReceiveSdk Finalizing for process %d\n", Id);
-                //     // Finalize = true;
-                // }
-            }else{
-                //shared(Finalize)
-                // #pragma omp parallel for private(i, tmpCellSdk) shared(Finalized)
+                tmpCellSdk = solveSudoku(popFromSdkPool());
+
+            }else{//Les ps 1+ résolvent leurs propres sudokus
+                //#pragma omp parallel for private(i, tmpCellSdk)
                 for (i = 0; i < count; i++) {
                     #pragma omp critical
                     tmpCellSdk = popFromSdkPool();
-                    tmpCellSdk = solveSudoku(tmpCellSdk, solvedReq);
-                    // if (tmpCellSdk && Finalized == false) {
-                    //     for (k = 0; k < P; k++){
-                    //         // mpiISendSolved(k);
-                    //         if (k != Id) mpiSendSolved(k);
-                    //     }
-                    //     // MPI_Finalize();
-                    //     Finalized = true;
-                    //     exit(0);
-                    // }
-                    MPI_Test(solvedReq, &flag, MPI_STATUS_IGNORE);
-                    if (!Finalized && flag) {
-                        Finalized = true;
-                        printf("Finalizing process %d\n", Id);
-                        // MPI_Finalize();
-                        exit(0);
-                    }
+                    tmpCellSdk = solveSudoku(tmpCellSdk);
+                    MPI_Test(&ReqSolved, &flag, MPI_STATUS_IGNORE);
+                    if (flag) quit(0);
                 }
             }
-            // MPI_Reduce(&Finalize, &Finalize, 1, MPI_C_BOOL, MPI_LOR, 0, MPI_COMM_WORLD);
-            // MPI_Bcast(&Finalize, 1, MPI_INT, 0, MPI_COMM_WORLD);
-            
-            // if(Finalize){
-            //     MPI_Finalize();
-            //     exit(0);
-            // }
-            
             return tmpCellSdk;
         }
     }
-    // MPI_Reduce(&Finalized, &Finalized, 1, MPI_C_BOOL, MPI_LOR, 0,
-    // MPI_COMM_WORLD); MPI_Bcast(&Finalized, 1, MPI_INT, 0, MPI_COMM_WORLD);
-    if(!Finalized){
-        Finalized = true;
-        printf("Process %d print :\n", Id);
-        printSudoku(cellSdk);
-        for (k = 0; k < P; k++) {
-            if (k != Id)
-                mpiISendSolved(k);
-            //     mpiSendSolved(k);
-        }
-        printf("Finalizing process %d\n", Id);
-        MPI_Finalize();
-        exit(0);
+    // Le sudoku a été résolu
+    printf("Process %d print :\n", Id);
+    printSudoku(cellSdk);
+    for (k = 0; k < P; k++) {
+        if (k != Id)
+            mpiISendSolved(k);
     }
-    
-    // MPI_Reduce(&Finalize, &Finalize, 1, MPI_C_BOOL, MPI_LOR, 0, MPI_COMM_WORLD);
-    // MPI_Bcast(&Finalize, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    quit(0);
     return cellSdk;
 }
-
 
 int main(int argc, char *argv[]) {
     MPI_Init(&argc, &argv);
@@ -482,10 +478,10 @@ int main(int argc, char *argv[]) {
     MPI_Bcast(&Size, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     sdkPool = NULL, sdkPoolSize = 0;
-    Finalized = false;
+    
     bool dummy = false;
-    MPI_Request req;
-    MPI_Irecv(&dummy, 1, MPI_C_BOOL, MPI_ANY_SOURCE, TAG_SOLVED, MPI_COMM_WORLD, &req);
+    MPI_Request reqReady;
+    MPI_Irecv(&dummy, 1, MPI_C_BOOL, MPI_ANY_SOURCE, TAG_SOLVED, MPI_COMM_WORLD, &ReqSolved);
     if (!Id) {
         loadFromInput(sdk);
         Cell **cellSdk = CellSudokuFromIntSudoku(sdk);
@@ -495,30 +491,15 @@ int main(int argc, char *argv[]) {
         }
         free(sdk);
         printSudoku(cellSdk);
-        solveSudoku(cellSdk, &req);
-        MPI_Finalize();
-        //destroyCellSdk(cellSdk);
+        solveSudoku(cellSdk);
     }else{
-        // int flag;
         while(true){
-            // MPI_Test(&req, &flag, MPI_STATUS_IGNORE);
-            // if (flag) {
-            //     printf("Finalizing process %d\n", Id);
-            //     MPI_Finalize();
-            //     exit(0);
-            // }
-            MPI_Send(&Id, 1, MPI_INT, 0, TAG_WAITING, MPI_COMM_WORLD);
-            solveSudoku(mpiReceiveSdk(), &req);
+            MPI_Isend(&Id, 1, MPI_INT, 0, TAG_WAITING, MPI_COMM_WORLD, &reqReady);
+            mpiWaitforRequest(&reqReady);
+            solveSudoku(mpiReceiveSdk());
         }
     }
-    //printIntSudoku(sdk);
-    
-    
-    
-    // sdk = solveSdk(sdk);
-    // if(sdk){
-    //     printIntSudoku(sdk);
-
-    // }
+    printf("Finalizing process %d\n", Id);
+    MPI_Finalize();
     return 0;
 }
