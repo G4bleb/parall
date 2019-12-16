@@ -297,7 +297,7 @@ Cell **popFromSdkPool() {
         sdkPoolSize--;
         return sdkPool[sdkPoolSize];
     } else {
-        printf("ps %d could not find any Sdk from pool\n", Id);
+        // printf("ps %d could not find any Sdk from pool\n", Id);
         return NULL;
     }
 }
@@ -445,6 +445,7 @@ Cell **solveSudoku(Cell **cellSdk) {
                 for (i = 0; i < count; i++) {
                     #pragma omp critical
                     tmpCellSdk = popFromSdkPool();
+                    if(!tmpCellSdk) return NULL;
                     tmpCellSdk = solveSudoku(tmpCellSdk);
                     MPI_Test(&ReqSolved, &flag, MPI_STATUS_IGNORE);
                     if (flag) quit(0);
